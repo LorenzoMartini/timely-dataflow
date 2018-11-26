@@ -1,5 +1,7 @@
 extern crate timely;
+extern crate streaming_harness_hdrhist;
 
+use std::time::Instant;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::{Feedback, ConnectLoop};
 use timely::dataflow::operators::generic::operator::Operator;
@@ -10,22 +12,33 @@ fn main() {
 
     timely::execute_from_args(std::env::args().skip(2), move |worker| {
 
+        let index = worker.index();
         worker.dataflow(move |scope| {
             let (handle, stream) = scope.feedback::<usize>(1);
+            let mut t0 = Instant::now();
+            let mut hist = streaming_harness_hdrhist::HDRHist::new();
             stream.unary_notify(
                 Pipeline,
                 "Barrier",
                 vec![0],
                 move |_, _, notificator| {
                     while let Some((cap, _count)) = notificator.next() {
+                        let t1 = Instant::now();
+                        let duration = t1.duration_since(t0);
+                        hist.add_value(duration.as_secs() * 1_000_000_000u64 + duration.subsec_nanos() as u64);
+                        t0 = t1;
                         let time = *cap.time() + 1;
                         if time < iterations {
                             notificator.notify_at(cap.delayed(&time));
+                        } else {
+                            if index == 0 {
+                                println!("{}", hist.summary_string());
+                            }
                         }
                     }
                 }
             )
-            .connect_loop(handle);
+                .connect_loop(handle);
         });
     }).unwrap(); // asserts error-free execution;
 }

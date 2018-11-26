@@ -1,5 +1,6 @@
 extern crate timely;
 extern crate streaming_harness_hdrhist;
+extern crate core_affinity;
 
 use std::time::Instant;
 use timely::dataflow::channels::pact::Pipeline;
@@ -13,6 +14,10 @@ fn main() {
     timely::execute_from_args(std::env::args().skip(2), move |worker| {
 
         let index = worker.index();
+        // Pin core
+        let core_ids = core_affinity::get_core_ids().unwrap();
+        core_affinity::set_for_current(core_ids[index % core_ids.len()]);
+
         worker.dataflow(move |scope| {
             let (handle, stream) = scope.feedback::<usize>(1);
             let mut t0 = Instant::now();
@@ -32,7 +37,11 @@ fn main() {
                             notificator.notify_at(cap.delayed(&time));
                         } else {
                             if index == 0 {
-                                println!("{}", hist.summary_string());
+                                println!("-------------\nSummary:\n{}", hist.summary_string());
+                                println!("-------------\nCDF:");
+                                for entry in hist.ccdf() {
+                                    println!("{:?}", entry);
+                                }
                             }
                         }
                     }

@@ -20,8 +20,8 @@ fn main() {
 
         worker.dataflow(move |scope| {
             let (handle, stream) = scope.feedback::<usize>(1);
-            let mut t0 = Instant::now();
             let mut hist = streaming_harness_hdrhist::HDRHist::new();
+            let mut t0 = Instant::now();
             stream.unary_notify(
                 Pipeline,
                 "Barrier",

@@ -14,7 +14,7 @@ fn main() {
 
         let index = worker.index();
         let peers = worker.peers();
-
+        timely::synchronization::Barrier::new(worker).wait();
         let timer = std::time::Instant::now();
 
         let mut input = InputHandle::new();

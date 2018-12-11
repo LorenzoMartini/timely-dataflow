@@ -1,7 +1,7 @@
 //! Networking code for sending and receiving fixed size `Vec<u8>` between machines.
 
 use std::io::{Read, Result};
-use std::net::{TcpListener, TcpStream};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Arc;
 use std::thread;
 use std::thread::sleep;
@@ -54,7 +54,7 @@ impl MessageHeader {
 }
 
 /// Creates socket connections from a list of host addresses.
-pub fn create_sockets(addresses: Vec<String>, my_index: usize, noisy: bool) -> Result<Vec<Option<TcpStream>>> {
+pub fn create_sockets(addresses: Vec<String>, my_index: usize, noisy: bool) -> Result<Vec<Option<UnixStream>>> {
 
     let hosts1 = Arc::new(addresses);
     let hosts2 = hosts1.clone();
@@ -74,14 +74,13 @@ pub fn create_sockets(addresses: Vec<String>, my_index: usize, noisy: bool) -> R
 
 
 /// Result contains connections [0, my_index - 1].
-pub fn start_connections(addresses: Arc<Vec<String>>, my_index: usize, noisy: bool) -> Result<Vec<Option<TcpStream>>> {
+pub fn start_connections(addresses: Arc<Vec<String>>, my_index: usize, noisy: bool) -> Result<Vec<Option<UnixStream>>> {
     let mut results: Vec<_> = (0..my_index).map(|_| None).collect();
     for index in 0..my_index {
         let mut connected = false;
         while !connected {
-            match TcpStream::connect(&addresses[index][..]) {
+            match UnixStream::connect(&addresses[index][..]) {
                 Ok(mut stream) => {
-                    stream.set_nodelay(true).expect("set_nodelay call failed");
                     unsafe { encode(&(my_index as u64), &mut stream) }.expect("failed to encode/send worker index");
                     results[index as usize] = Some(stream);
                     if noisy { println!("worker {}:\tconnection to worker {}", my_index, index); }
@@ -99,13 +98,12 @@ pub fn start_connections(addresses: Arc<Vec<String>>, my_index: usize, noisy: bo
 }
 
 /// Result contains connections [my_index + 1, addresses.len() - 1].
-pub fn await_connections(addresses: Arc<Vec<String>>, my_index: usize, noisy: bool) -> Result<Vec<Option<TcpStream>>> {
+pub fn await_connections(addresses: Arc<Vec<String>>, my_index: usize, noisy: bool) -> Result<Vec<Option<UnixStream>>> {
     let mut results: Vec<_> = (0..(addresses.len() - my_index - 1)).map(|_| None).collect();
-    let listener = try!(TcpListener::bind(&addresses[my_index][..]));
+    let listener = try!(UnixListener::bind(&addresses[my_index][..]));
 
     for _ in (my_index + 1) .. addresses.len() {
         let mut stream = listener.accept()?.0;
-        stream.set_nodelay(true).expect("set_nodelay call failed");
         let mut buffer = [0u8;8];
         stream.read_exact(&mut buffer).expect("failed to read worker index");
         let identifier = unsafe { decode::<u64>(&mut buffer) }.expect("failed to decode worker index").0.clone() as usize;

@@ -1,7 +1,7 @@
 //!
 
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::os::unix::net::UnixStream;
 
 use networking::MessageHeader;
 
@@ -19,7 +19,7 @@ use ::logging::{CommunicationEvent, CommunicationSetup, MessageEvent, StateEvent
 /// If the stream ends without being shut down, the receive thread panics in an attempt to
 /// take down the computation and cause the failures to cascade.
 pub fn recv_loop(
-    mut reader: TcpStream,
+    mut reader: UnixStream,
     mut targets: Vec<MergeQueue>,
     worker_offset: usize,
     process: usize,
@@ -110,7 +110,7 @@ pub fn recv_loop(
 /// messages, followed by a header for a zero length message indicating the end of stream.
 pub fn send_loop(
     // TODO: Maybe we don't need BufWriter with consolidation in writes.
-    writer: TcpStream,
+    writer: UnixStream,
     mut sources: Vec<MergeQueue>,
     signal: Signal,
     process: usize,

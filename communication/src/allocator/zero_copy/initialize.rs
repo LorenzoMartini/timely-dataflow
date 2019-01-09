@@ -1,7 +1,8 @@
 //! Network initialization.
 
 use std::sync::Arc;
-use allocator::Process;
+// use allocator::Process;
+use allocator::process::ProcessBuilder;
 use networking::create_sockets;
 use super::tcp::{send_loop, recv_loop};
 use super::allocator::{TcpBuilder, new_vector};
@@ -38,17 +39,19 @@ pub fn initialize_networking(
     threads: usize,
     noisy: bool,
     log_sender: Box<Fn(CommunicationSetup)->Option<Logger<CommunicationEvent, CommunicationSetup>>+Send+Sync>)
--> ::std::io::Result<(Vec<TcpBuilder<Process>>, CommsGuard)>
-// where
-//     F: Fn(CommunicationSetup)->Option<Logger<CommunicationEvent>>+Send+Sync+'static,
+-> ::std::io::Result<(Vec<TcpBuilder<ProcessBuilder>>, CommsGuard)>
 {
     let log_sender = Arc::new(log_sender);
     let processes = addresses.len();
 
-    let mut results = create_sockets(addresses, my_index, noisy)?;
+    // one per process (including local, which would be None)
+    let mut results: Vec<Option<::std::net::TcpStream>> =
+        create_sockets(addresses, my_index, noisy)?;
 
     let (builders, remote_recvs, remote_sends) = new_vector(my_index, threads, processes);
+    // egress queues
     let mut remote_recv_iter = remote_recvs.into_iter();
+    // ingress queues
     let mut remote_send_iter = remote_sends.into_iter();
 
     let mut send_guards = Vec::new();
@@ -58,6 +61,7 @@ pub fn initialize_networking(
     for index in 0..results.len() {
 
         if let Some(stream) = results[index].take() {
+            // remote process
 
             let (remote_recv, signal) = remote_recv_iter.next().unwrap();
 

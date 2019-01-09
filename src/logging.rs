@@ -114,11 +114,8 @@ pub struct MessagesEvent {
 pub enum StartStop {
     /// Operator starts.
     Start,
-    /// Operator stops; did it have any activity?
-    Stop {
-        /// Did the operator perform non-trivial work.
-        activity: bool
-    },
+    /// Operator stops.
+    Stop,
 }
 
 #[derive(Abomonation, Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -130,6 +127,13 @@ pub struct ScheduleEvent {
     /// activity is true if it looks like some useful work was performed during this call (data was
     /// read or written, notifications were requested / delivered)
     pub start_stop: StartStop,
+}
+
+impl ScheduleEvent {
+    /// Creates a new start scheduling event.
+    pub fn start(id: usize) -> Self { ScheduleEvent { id, start_stop: StartStop::Start } }
+    /// Creates a new stop scheduling event and reports whether work occurred.
+    pub fn stop(id: usize) -> Self { ScheduleEvent { id, start_stop: StartStop::Stop } }
 }
 
 #[derive(Abomonation, Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]

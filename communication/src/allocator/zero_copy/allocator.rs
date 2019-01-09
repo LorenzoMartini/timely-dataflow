@@ -8,8 +8,11 @@ use bytes::arc::Bytes;
 
 use networking::MessageHeader;
 
-use {Allocate, Data, Push, Pull};
-use allocator::{Message, Process};
+use {Allocate, Message, Data, Push, Pull};
+use allocator::AllocateBuilder;
+use allocator::{Event, Process};
+use allocator::process::ProcessBuilder;
+use allocator::canary::Canary;
 
 use super::bytes_exchange::{BytesPull, SendEndpoint, MergeQueue, Signal};
 use super::push_pull::{Pusher, PullerInner};
@@ -20,7 +23,7 @@ use super::push_pull::{Pusher, PullerInner};
 /// threads (specifically, the `Rc<RefCell<_>>` local channels). So, we must package up the state
 /// shared between threads here, and then provide a method that will instantiate the non-movable
 /// members once in the destination thread.
-pub struct TcpBuilder<A: Allocate> {
+pub struct TcpBuilder<A: AllocateBuilder> {
     inner:      A,
     index:      usize,              // number out of peers
     peers:      usize,              // number of peer allocators.
@@ -30,17 +33,32 @@ pub struct TcpBuilder<A: Allocate> {
 }
 
 /// Creates a vector of builders, sharing appropriate state.
+///
+/// `threads` is the number of workers in a single process, `processes` is the
+/// total number of processes.
+/// The returned tuple contains
+/// ```
+/// (
+///   AllocateBuilder for local threads,
+///   info to spawn egress comm threads,
+///   info to spawn ingress comm thresds,
+/// )
+/// ```
 pub fn new_vector(
     my_process: usize,
     threads: usize,
     processes: usize)
-// -> (Vec<TcpBuilder<Process>>, Vec<Receiver<Bytes>>, Vec<Sender<Bytes>>) {
--> (Vec<TcpBuilder<Process>>, Vec<(Vec<MergeQueue>, Signal)>, Vec<Vec<MergeQueue>>) {
+-> (Vec<TcpBuilder<ProcessBuilder>>,
+    Vec<(Vec<MergeQueue>, Signal)>,
+    Vec<Vec<MergeQueue>>) {
 
     // The results are a vector of builders, as well as the necessary shared state to build each
     // of the send and receive communication threads, respectively.
 
+    // One signal per local destination worker thread
     let worker_signals: Vec<Signal> = (0 .. threads).map(|_| Signal::new()).collect();
+
+    // One signal per destination egress communication thread
     let network_signals: Vec<Signal> = (0 .. processes-1).map(|_| Signal::new()).collect();
 
     let worker_to_network: Vec<Vec<_>> = (0 .. threads).map(|_| (0 .. processes-1).map(|p| MergeQueue::new(network_signals[p].clone())).collect()).collect();
@@ -50,13 +68,17 @@ pub fn new_vector(
     let network_from_worker: Vec<Vec<_>> = (0 .. processes-1).map(|p| (0 .. threads).map(|t| worker_to_network[t][p].clone()).collect()).collect();
 
     let builders =
-    Process::new_vector(threads)
+    Process::new_vector(threads) // Vec<Process> (Process is Allocate)
         .into_iter()
         .zip(worker_signals)
         .zip(worker_to_network)
         .zip(worker_from_network)
         .enumerate()
         .map(|(index, (((inner, signal), sends), recvs))| {
+            // sends are handles to MergeQueues to remote processes
+            // (one per remote process)
+            // recvs are handles to MergeQueues from remote processes
+            // (one per remote process)
             TcpBuilder {
                 inner,
                 index: my_process * threads + index,
@@ -67,28 +89,29 @@ pub fn new_vector(
             }})
         .collect();
 
+    // for each egress communicaton thread, construct the tuple (MergeQueues from local
+    // threads, corresponding signal)
     let sends = network_from_worker.into_iter().zip(network_signals).collect();
 
-    (builders, sends, network_to_worker)
+    (/* AllocateBuilder for local threads */  builders,
+     /* info to spawn egress comm threads */  sends,
+     /* info to spawn ingress comm thresds */ network_to_worker)
 }
 
-impl<A: Allocate> TcpBuilder<A> {
+impl<A: AllocateBuilder> TcpBuilder<A> {
 
     /// Builds a `TcpAllocator`, instantiating `Rc<RefCell<_>>` elements.
-    pub fn build(self) -> TcpAllocator<A> {
+    pub fn build(self) -> TcpAllocator<A::Allocator> {
 
-        let mut sends = Vec::new();
-        for send in self.sends.into_iter() {
-            let sendpoint = SendEndpoint::new(send);
-            sends.push(Rc::new(RefCell::new(sendpoint)));
-        }
+        let sends: Vec<_> = self.sends.into_iter().map(
+            |send| Rc::new(RefCell::new(SendEndpoint::new(send)))).collect();
 
         TcpAllocator {
-            inner: self.inner,
+            inner: self.inner.build(),
             index: self.index,
             peers: self.peers,
-            // allocated: 0,
             _signal: self.signal,
+            canaries: Rc::new(RefCell::new(Vec::new())),
             staged: Vec::new(),
             sends,
             recvs: self.recvs,
@@ -104,15 +127,15 @@ pub struct TcpAllocator<A: Allocate> {
 
     index:      usize,                              // number out of peers
     peers:      usize,                              // number of peer allocators (for typed channel allocation).
-    // allocated:  usize,                              // indicates how many channels have been allocated (locally).
 
     _signal:     Signal,
 
-    staged:     Vec<Bytes>,
+    staged:     Vec<Bytes>,                         // staging area for incoming Bytes
+    canaries:   Rc<RefCell<Vec<usize>>>,
 
     // sending, receiving, and responding to binary buffers.
     sends:      Vec<Rc<RefCell<SendEndpoint<MergeQueue>>>>,     // sends[x] -> goes to process x.
-    recvs:      Vec<MergeQueue>,                                // recvs[x] <- from process x?.
+    recvs:      Vec<MergeQueue>,                                // recvs[x] <- from process x.
     to_local:   HashMap<usize, Rc<RefCell<VecDeque<Bytes>>>>,   // to worker-local typed pullers.
 }
 
@@ -158,18 +181,35 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
             .or_insert_with(|| Rc::new(RefCell::new(VecDeque::new())))
             .clone();
 
-        let puller = Box::new(PullerInner::new(inner_recv, channel));
+        use allocator::counters::Puller as CountPuller;
+        let canary = Canary::new(identifier, self.canaries.clone());
+        let puller = Box::new(CountPuller::new(PullerInner::new(inner_recv, channel, canary), identifier, self.events().clone()));
 
         (pushes, puller, )
     }
 
     // Perform preparatory work, most likely reading binary buffers from self.recv.
     #[inline(never)]
-    fn pre_work(&mut self) {
+    fn receive(&mut self) {
+
+        // Check for channels whose `Puller` has been dropped.
+        let mut canaries = self.canaries.borrow_mut();
+        for dropped_channel in canaries.drain(..) {
+            let dropped =
+            self.to_local
+                .remove(&dropped_channel)
+                .expect("non-existent channel dropped");
+            assert!(dropped.borrow().is_empty());
+        }
+        ::std::mem::drop(canaries);
+
+        self.inner.receive();
 
         for recv in self.recvs.iter_mut() {
             recv.drain_into(&mut self.staged);
         }
+
+        let mut events = self.inner.events().borrow_mut();
 
         for mut bytes in self.staged.drain(..) {
 
@@ -182,6 +222,9 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                     // Get the header and payload, ditch the header.
                     let mut peel = bytes.extract_to(header.required_bytes());
                     let _ = peel.extract_to(40);
+
+                    // Increment message count for channel.
+                    events.push_back((header.channel, Event::Pushed(1)));
 
                     // Ensure that a queue exists.
                     // We may receive data before allocating, and shouldn't block.
@@ -199,7 +242,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
     }
 
     // Perform postparatory work, most likely sending un-full binary buffers.
-    fn post_work(&mut self) {
+    fn release(&mut self) {
         // Publish outgoing byte ledgers.
         for send in self.sends.iter_mut() {
             send.borrow_mut().publish();
@@ -213,5 +256,8 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         //         eprintln!("Warning: worker {}, undrained channel[{}].len() = {}", self.index, index, len);
         //     }
         // }
+    }
+    fn events(&self) -> &Rc<RefCell<VecDeque<(usize, Event)>>> {
+        self.inner.events()
     }
 }

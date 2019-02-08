@@ -23,6 +23,8 @@ abomonation = "0.7"
 abomonation_derive = "0.3"
 timely_bytes = { path = "../bytes", version = "0.7" }
 timely_logging = { path = "../logging", version = "0.7" }
+streaming-harness-hdrhist = { git = "https://github.com/utaal/hdrhist-rust" }
+amd64_timer = { git = "https://github.com/valarauca/amd64_timer" }
 
 [profile.release]
 opt-level = 3

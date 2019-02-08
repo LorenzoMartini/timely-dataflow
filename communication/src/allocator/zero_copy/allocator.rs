@@ -150,15 +150,17 @@ pub struct TcpAllocator<A: Allocate> {
 
 impl<A: Allocate> Drop for TcpAllocator<A> {
     fn drop(&mut self) {
-        println!("------------\nLock summary\n---------------");
-        println!("{}", self.hist_lock.summary_string());
-        for entry in self.hist_lock.ccdf() {
-            println!("{:?}", entry);
-        }
-        println!("------------\nMessage pull to pull summary\n---------------");
-        println!("{}", self.hist_processing.summary_string());
-        for entry in self.hist_processing.ccdf() {
-            println!("{:?}", entry);
+        if self.index == 0 {
+            println!("------------\nLock summary\n---------------");
+            println!("{}", self.hist_lock.summary_string());
+            for entry in self.hist_lock.ccdf() {
+                println!("{:?}", entry);
+            }
+            println!("------------\nMessage pull to pull summary\n---------------");
+            println!("{}", self.hist_processing.summary_string());
+            for entry in self.hist_processing.ccdf() {
+                println!("{:?}", entry);
+            }
         }
     }
 }
@@ -241,7 +243,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         }
 
         let mut events = self.inner.events().borrow_mut();
-        let mut count: usize = 0;
+        let mut tot_messages: usize = 0;
         for mut bytes in self.staged.drain(..) {
 
             // We expect that `bytes` contains an integral number of messages.
@@ -264,7 +266,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                         .or_insert_with(|| Rc::new(RefCell::new(VecDeque::new())))
                         .borrow_mut()
                         .push_back(peel);
-                    count += 1;
+                    tot_messages += 1;
                 }
                 else {
                     println!("failed to read full header!");
@@ -274,7 +276,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
 
         // TODO here to local puller
         let tf = ticks();
-        for _ in 0..count {
+        for _ in 0..tot_messages {
             self.hist_processing.add_value(tf -t0_pull);
         }
     }

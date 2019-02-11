@@ -29,7 +29,7 @@ pub fn recv_loop(
 {
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: true }));
-
+    reader.set_nonblocking(true);
     let mut buffer = BytesSlab::new(20);
 
     // Where we stash Bytes before handing them off.

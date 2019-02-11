@@ -48,17 +48,19 @@ pub fn recv_loop(
     let mut active = true;
 
     let mut hist_read = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist_read_process = streaming_harness_hdrhist::HDRHist::new();
     let mut hist_processing = streaming_harness_hdrhist::HDRHist::new();
     let mut hist_lock = streaming_harness_hdrhist::HDRHist::new();
 
     while active {
 
         // TODO start read
-        let t0_read = ticks();
+        let t0_read_process = ticks();
         buffer.ensure_capacity(1);
 
         assert!(!buffer.empty().is_empty());
 
+        let t0_read = ticks();
         // Attempt to read some more bytes into self.buffer.
         let read = match reader.read(&mut buffer.empty()) {
             Ok(n) => n,
@@ -69,13 +71,16 @@ pub fn recv_loop(
             },
         };
 
+        // TODO done read && start processing
+        let t1_read = ticks();
         assert!(read > 0);
         buffer.make_valid(read);
 
-        // TODO done read && start processing
-        let t1_read = ticks();
+        let t1_read_process = ticks();
         hist_read.add_value(t1_read - t0_read);
+        hist_read_process.add_value(t1_read_process - t0_read_process);
         // Consume complete messages from the front of self.buffer.
+        let t0_processing = ticks();
         while let Some(header) = MessageHeader::try_read(buffer.valid()) {
 
             // TODO: Consolidate message sequences sent to the same worker?
@@ -112,7 +117,7 @@ pub fn recv_loop(
             let t0_lock = ticks();
             targets[index].extend(staged.drain(..));
             let t1_lock = ticks();
-            hist_processing.add_value(t1_lock - t1_read);
+            hist_processing.add_value(t1_lock - t0_processing);
             hist_lock.add_value(t1_lock - t0_lock);
         }
 
@@ -121,6 +126,11 @@ pub fn recv_loop(
     println!("------------\nMessage read summary\n---------------");
     println!("{}", hist_read.summary_string());
     for entry in hist_read.ccdf() {
+        println!("{:?}", entry);
+    }
+    println!("------------\nMessage read processing summary\n---------------");
+    println!("{}", hist_read_processing.summary_string());
+    for entry in hist_read_processing.ccdf() {
         println!("{:?}", entry);
     }
     println!("------------\nMergeQueue summary\n---------------");

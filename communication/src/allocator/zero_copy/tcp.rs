@@ -53,6 +53,7 @@ pub fn recv_loop(
     let mut hist_lock = streaming_harness_hdrhist::HDRHist::new();
     let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
+    let mut xx = 0;
     while active {
 
         // TODO start read
@@ -70,6 +71,7 @@ pub fn recv_loop(
                 Err(err) => match err.kind() {
                     std::io::ErrorKind::WouldBlock => {
                         t0_read = ticks();
+                        xx += 1;
                         0
                     },
                     _ => panic!("Error occurred while reading: {:?}", err),
@@ -129,7 +131,7 @@ pub fn recv_loop(
         }
 
     }
-    println!("------------\nNBytes read summary\n---------------");
+    println!("------------\nNBytes read summary\n---------------{}", xx);
     println!("{}", hist_n_bytes.summary_string());
     for entry in hist_n_bytes.ccdf() {
         println!("{:?}", entry);

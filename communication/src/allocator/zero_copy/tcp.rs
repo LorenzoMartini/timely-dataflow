@@ -129,8 +129,8 @@ pub fn recv_loop(
         println!("{:?}", entry);
     }
     println!("------------\nMessage read processing summary\n---------------");
-    println!("{}", hist_read_processing.summary_string());
-    for entry in hist_read_processing.ccdf() {
+    println!("{}", hist_read_process.summary_string());
+    for entry in hist_read_process.ccdf() {
         println!("{:?}", entry);
     }
     println!("------------\nMergeQueue summary\n---------------");

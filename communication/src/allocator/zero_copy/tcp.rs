@@ -51,6 +51,7 @@ pub fn recv_loop(
     let mut hist_read_process = streaming_harness_hdrhist::HDRHist::new();
     let mut hist_processing = streaming_harness_hdrhist::HDRHist::new();
     let mut hist_lock = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
     while active {
 
@@ -79,6 +80,7 @@ pub fn recv_loop(
         let t1_read_process = ticks();
         hist_read.add_value(t1_read - t0_read);
         hist_read_process.add_value(t1_read_process - t0_read_process);
+        hist_n_bytes.add_value(read as u64);
         // Consume complete messages from the front of self.buffer.
         let t0_processing = ticks();
         while let Some(header) = MessageHeader::try_read(buffer.valid()) {
@@ -122,7 +124,11 @@ pub fn recv_loop(
         }
 
     }
-
+    println!("------------\nNBytes read summary\n---------------");
+    println!("{}", hist_n_bytes.summary_string());
+    for entry in hist_n_bytes.ccdf() {
+        println!("{:?}", entry);
+    }
     println!("------------\nMessage read summary\n---------------");
     println!("{}", hist_read.summary_string());
     for entry in hist_read.ccdf() {

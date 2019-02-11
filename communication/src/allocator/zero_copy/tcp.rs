@@ -69,7 +69,7 @@ pub fn recv_loop(
             read = match reader.read(&mut buffer.empty()) {
                 Ok(n) => n,
                 Err(err) => match err.kind() {
-                    std::io::ErrorKind::WouldBlock => {
+                    WouldBlock => {
                         t0_read = ticks();
                         0
                     },

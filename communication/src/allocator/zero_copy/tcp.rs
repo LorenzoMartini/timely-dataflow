@@ -54,7 +54,6 @@ pub fn recv_loop(
     let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
     let mut xx = 0;
-    reader.set_nonblocking(true);
     while active {
 
         // TODO start read
@@ -157,6 +156,8 @@ pub fn recv_loop(
     for entry in hist_processing.ccdf() {
         println!("{:?}", entry);
     }
+
+    reader.set_nonblocking(false);
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: false, }));
 }

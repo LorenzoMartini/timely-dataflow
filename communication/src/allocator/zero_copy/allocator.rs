@@ -1,11 +1,7 @@
 //! Zero-copy allocator based on TCP.
-extern crate streaming_harness_hdrhist;
-extern crate amd64_timer;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::{VecDeque, HashMap};
-
-use self::amd64_timer::ticks;
 // use std::sync::mpsc::{channel, Sender, Receiver};
 
 use bytes::arc::Bytes;
@@ -120,8 +116,6 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
             sends,
             recvs: self.recvs,
             to_local: HashMap::new(),
-            hist_lock: streaming_harness_hdrhist::HDRHist::new(),
-            hist_processing: streaming_harness_hdrhist::HDRHist::new(),
         }
     }
 }
@@ -143,26 +137,6 @@ pub struct TcpAllocator<A: Allocate> {
     sends:      Vec<Rc<RefCell<SendEndpoint<MergeQueue>>>>,     // sends[x] -> goes to process x.
     recvs:      Vec<MergeQueue>,                                // recvs[x] <- from process x.
     to_local:   HashMap<usize, Rc<RefCell<VecDeque<Bytes>>>>,   // to worker-local typed pullers.
-
-    hist_lock: streaming_harness_hdrhist::HDRHist,
-    hist_processing: streaming_harness_hdrhist::HDRHist,
-}
-
-impl<A: Allocate> Drop for TcpAllocator<A> {
-    fn drop(&mut self) {
-        if self.index == 0 {
-            println!("------------\nLock summary\n---------------");
-            println!("{}", self.hist_lock.summary_string());
-            for entry in self.hist_lock.ccdf() {
-                println!("{:?}", entry);
-            }
-            println!("------------\nMessage pull to pull summary\n---------------");
-            println!("{}", self.hist_processing.summary_string());
-            for entry in self.hist_processing.ccdf() {
-                println!("{:?}", entry);
-            }
-        }
-    }
 }
 
 impl<A: Allocate> Allocate for TcpAllocator<A> {
@@ -231,19 +205,11 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
 
         self.inner.receive();
 
-        // TODO t0 for pulling out of queue
-        let t0_pull = ticks();
         for recv in self.recvs.iter_mut() {
-            // TODO here acquire lock and take out of queue
-            let t0 = ticks();
             recv.drain_into(&mut self.staged);
-            // TODO here take out of queue done
-            let t1 = ticks();
-            self.hist_lock.add_value(t1 - t0);
         }
 
         let mut events = self.inner.events().borrow_mut();
-        let mut tot_messages: usize = 0;
         for mut bytes in self.staged.drain(..) {
 
             // We expect that `bytes` contains an integral number of messages.
@@ -266,18 +232,11 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                         .or_insert_with(|| Rc::new(RefCell::new(VecDeque::new())))
                         .borrow_mut()
                         .push_back(peel);
-                    tot_messages += 1;
                 }
                 else {
                     println!("failed to read full header!");
                 }
             }
-        }
-
-        // TODO here to local puller
-        let tf = ticks();
-        for _ in 0..tot_messages {
-            self.hist_processing.add_value(tf -t0_pull);
         }
     }
 

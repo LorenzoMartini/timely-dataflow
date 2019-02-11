@@ -1,8 +1,9 @@
 //!
-
+extern crate streaming_harness_hdrhist;
+extern crate amd64_timer;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-
+use self::amd64_timer::ticks;
 use networking::MessageHeader;
 
 use super::bytes_slab::BytesSlab;
@@ -45,8 +46,15 @@ pub fn recv_loop(
     // allocation and place the existing Bytes into `self.in_progress`, so that it
     // can be recovered once all readers have read what they need to.
     let mut active = true;
+
+    let mut hist_read = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist_processing = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist_lock = streaming_harness_hdrhist::HDRHist::new();
+
     while active {
 
+        // TODO start read
+        let t0_read = ticks();
         buffer.ensure_capacity(1);
 
         assert!(!buffer.empty().is_empty());
@@ -64,6 +72,9 @@ pub fn recv_loop(
         assert!(read > 0);
         buffer.make_valid(read);
 
+        // TODO done read && start processing
+        let t1_read = ticks();
+        hist_read.add_value(t1_read - t0_read);
         // Consume complete messages from the front of self.buffer.
         while let Some(header) = MessageHeader::try_read(buffer.valid()) {
 
@@ -92,14 +103,36 @@ pub fn recv_loop(
             }
         }
 
+
         // Pass bytes along to targets.
         for (index, staged) in stageds.iter_mut().enumerate() {
             // FIXME: try to merge `staged` before handing it to BytesPush::extend
             use allocator::zero_copy::bytes_exchange::BytesPush;
+            // TODO LOCK
+            let t0_lock = ticks();
             targets[index].extend(staged.drain(..));
+            let t1_lock = ticks();
+            hist_processing.add_value(t1_lock - t1_read);
+            hist_lock.add_value(t1_lock - t0_lock);
         }
+
     }
 
+    println!("------------\nMessage read summary\n---------------");
+    println!("{}", hist_read.summary_string());
+    for entry in hist_read.ccdf() {
+        println!("{:?}", entry);
+    }
+    println!("------------\nMergeQueue summary\n---------------");
+    println!("{}", hist_lock.summary_string());
+    for entry in hist_lock.ccdf() {
+        println!("{:?}", entry);
+    }
+    println!("------------\nMessage processing (interpret + put in mergequeue) summary\n---------------");
+    println!("{}", hist_processing.summary_string());
+    for entry in hist_processing.ccdf() {
+        println!("{:?}", entry);
+    }
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: false, }));
 }

@@ -54,6 +54,7 @@ pub fn recv_loop(
     let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
     let mut xx = 0;
+    reader.set_nonblocking(true);
     while active {
 
         // TODO start read

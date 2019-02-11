@@ -61,7 +61,7 @@ pub fn recv_loop(
 
         assert!(!buffer.empty().is_empty());
 
-        let t0_read = ticks();
+        let mut t0_read = ticks();
         // Attempt to read some more bytes into self.buffer.
         let mut read = 0;
         reader.set_nonblocking(true);
@@ -69,7 +69,10 @@ pub fn recv_loop(
             read = match reader.read(&mut buffer.empty()) {
                 Ok(n) => n,
                 Err(err) => match err.kind() {
-                    std::io::ErrorKind::WouldBlock => 0,
+                    std::io::ErrorKind::WouldBlock => {
+                        t0_read = ticks();
+                        0
+                    },
                     _ => panic!("Error occurred while reading: {:?}", err),
                 }
             }

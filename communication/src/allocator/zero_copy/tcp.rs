@@ -63,14 +63,17 @@ pub fn recv_loop(
 
         let t0_read = ticks();
         // Attempt to read some more bytes into self.buffer.
-        let read = match reader.read(&mut buffer.empty()) {
-            Ok(n) => n,
-            Err(x) => {
-                // We don't expect this, as socket closure results in Ok(0) reads.
-                println!("Error: {:?}", x);
-                0
-            },
-        };
+        let mut read = 0;
+        reader.set_nonblocking(true);
+        while read <= 0 {
+            read = match reader.read(&mut buffer.empty()) {
+                Ok(n) => n,
+                Err(err) => match err.kind() {
+                    std::io::ErrorKind::WouldBlock => 0,
+                    _ => panic!("Error occurred while reading: {:?}", err),
+                }
+            }
+        }
 
         // TODO done read && start processing
         let t1_read = ticks();

@@ -63,6 +63,8 @@ pub fn initialize_networking(
         if let Some(stream) = results[index].take() {
             // remote process
 
+            stream.set_nonblocking(true);
+
             let (remote_recv, signal) = remote_recv_iter.next().unwrap();
 
             {

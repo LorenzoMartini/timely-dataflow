@@ -64,12 +64,11 @@ pub fn recv_loop(
         let mut t0_read = ticks();
         // Attempt to read some more bytes into self.buffer.
         let mut read = 0;
-        reader.set_nonblocking(true);
         while read <= 0 {
             read = match reader.read(&mut buffer.empty()) {
                 Ok(n) => n,
                 Err(err) => match err.kind() {
-                    WouldBlock => {
+                    std::io::ErrorKind::WouldBlock => {
                         t0_read = ticks();
                         0
                     },

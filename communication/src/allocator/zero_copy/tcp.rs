@@ -207,7 +207,16 @@ pub fn send_loop(
             // still be a signal incoming.
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
-            writer.flush().expect("Failed to flush writer.");
+            let mut flushed = false;
+            while !flushed {
+                match writer.flush() {
+                    Ok(_) => flushed = true,
+                    Err(err) => match err.kind() {
+                        std::io::ErrorKind::WouldBlock => {},
+                        err => panic!("Failed to flush writer, err {:?}", err)
+                    }
+                }
+            }
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
                 signal.wait();
@@ -225,8 +234,16 @@ pub fn send_loop(
                         offset += header.required_bytes();
                     }
                 });
-
-                writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
+                let mut written = false;
+                while !written {
+                    match writer.write_all(&bytes[..]) {
+                        Ok(_) => written = true,
+                        Err(err) => match err.kind() {
+                            std::io::ErrorKind::WouldBlock => {},
+                            err => panic!("Write failure in send_loop {:?}", err)
+                        }
+                    }
+                }
             }
         }
     }

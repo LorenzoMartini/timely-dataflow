@@ -53,11 +53,7 @@ pub fn recv_loop(
     let mut hist_lock = streaming_harness_hdrhist::HDRHist::new();
     let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
-    let mut xx = 0;
     while active {
-
-        // TODO start read
-        let t0_read_process = ticks();
         buffer.ensure_capacity(1);
 
         assert!(!buffer.empty().is_empty());
@@ -71,7 +67,6 @@ pub fn recv_loop(
                 Err(err) => match err.kind() {
                     std::io::ErrorKind::WouldBlock => {
                         t0_read = ticks();
-                        xx += 1;
                         0
                     },
                     _ => panic!("Error occurred while reading: {:?}", err),
@@ -86,7 +81,7 @@ pub fn recv_loop(
 
         let t1_read_process = ticks();
         hist_read.add_value(t1_read - t0_read);
-        hist_read_process.add_value(t1_read_process - t0_read_process);
+        hist_read_process.add_value(t1_read_process - t0_read);
         hist_n_bytes.add_value(read as u64);
         // Consume complete messages from the front of self.buffer.
         let t0_processing = ticks();
@@ -132,7 +127,7 @@ pub fn recv_loop(
         }
 
     }
-    println!("------------\nNBytes read summary\n---------------{}", xx);
+    println!("------------\nNBytes read summary\n---------------");
     println!("{}", hist_n_bytes.summary_string());
     for entry in hist_n_bytes.ccdf() {
         println!("{:?}", entry);
@@ -142,21 +137,21 @@ pub fn recv_loop(
     for entry in hist_read.ccdf() {
         println!("{:?}", entry);
     }
-    println!("------------\nMessage read processing summary\n---------------");
-    println!("{}", hist_read_process.summary_string());
-    for entry in hist_read_process.ccdf() {
-        println!("{:?}", entry);
-    }
-    println!("------------\nMergeQueue summary\n---------------");
-    println!("{}", hist_lock.summary_string());
-    for entry in hist_lock.ccdf() {
-        println!("{:?}", entry);
-    }
-    println!("------------\nMessage processing (interpret + put in mergequeue) summary\n---------------");
-    println!("{}", hist_processing.summary_string());
-    for entry in hist_processing.ccdf() {
-        println!("{:?}", entry);
-    }
+//    println!("------------\nMessage read processing summary\n---------------");
+//    println!("{}", hist_read_process.summary_string());
+//    for entry in hist_read_process.ccdf() {
+//        println!("{:?}", entry);
+//    }
+//    println!("------------\nMergeQueue summary\n---------------");
+//    println!("{}", hist_lock.summary_string());
+//    for entry in hist_lock.ccdf() {
+//        println!("{:?}", entry);
+//    }
+//    println!("------------\nMessage processing (interpret + put in mergequeue) summary\n---------------");
+//    println!("{}", hist_processing.summary_string());
+//    for entry in hist_processing.ccdf() {
+//        println!("{:?}", entry);
+//    }
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: false, }));

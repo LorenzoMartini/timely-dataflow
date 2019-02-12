@@ -115,7 +115,6 @@ pub fn recv_loop(
                             if n > 0 {
                                 panic!("Clean shutdown followed by data.");
                             }
-                            eprintln!("SHUTDOWNNNNNNNNNNNN");
                             n as isize
                         },
                         Err(err) => match err.kind() {
@@ -243,7 +242,16 @@ pub fn send_loop(
         seqno:      0,
     };
     header.write_to(&mut writer).expect("Failed to write header!");
-    writer.flush().expect("Failed to flush writer.");
+    let mut flushed = false;
+    while !flushed {
+        match writer.flush() {
+            Ok(_) => flushed = true,
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::WouldBlock => {},
+                _ => panic!("Failed to flush writer.")
+            }
+        }
+    }
     writer.get_mut().shutdown(::std::net::Shutdown::Write).expect("Write shutdown failed");
     logger.as_mut().map(|logger| logger.log(MessageEvent { is_send: true, header }));
 

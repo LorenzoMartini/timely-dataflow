@@ -60,14 +60,14 @@ pub fn recv_loop(
 
         let mut t0_read = ticks();
         // Attempt to read some more bytes into self.buffer.
-        let mut read = -1;
-        while read < 0 {
+        let mut read = 0;
+        while read <= 0 {
             read = match reader.read(&mut buffer.empty()) {
                 Ok(n) => n,
                 Err(err) => match err.kind() {
                     std::io::ErrorKind::WouldBlock => {
                         t0_read = ticks();
-                        -1
+                        0
                     },
                     _ => panic!("Error occurred while reading: {:?}", err),
                 }
@@ -106,9 +106,24 @@ pub fn recv_loop(
                     panic!("Clean shutdown followed by data.");
                 }
                 buffer.ensure_capacity(1);
-                reader.set_nonblocking(false);
-                if reader.read(&mut buffer.empty()).expect("read failure") > 0 {
-                    panic!("Clean shutdown followed by data.");
+
+                // Shutdown
+                let mut last_read = -1;
+                while last_read < 0 {
+                    last_read = match reader.read(&mut buffer.empty()) {
+                        Ok(n) => {
+                            if n > 0 {
+                                panic!("Clean shutdown followed by data.");
+                            }
+                            n as isize
+                        },
+                        Err(err) => match err.kind() {
+                            std::io::ErrorKind::WouldBlock => {
+                                -1
+                            },
+                            _ => panic!("Error occurred while shutting down stream: {:?}", err),
+                        }
+                    }
                 }
             }
         }

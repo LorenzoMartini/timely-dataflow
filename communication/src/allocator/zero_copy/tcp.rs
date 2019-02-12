@@ -248,7 +248,7 @@ pub fn send_loop(
             Ok(_) => flushed = true,
             Err(err) => match err.kind() {
                 std::io::ErrorKind::WouldBlock => {},
-                _ => panic!("Failed to flush writer.")
+                err => panic!("Failed to flush writer, err {}", err)
             }
         }
     }

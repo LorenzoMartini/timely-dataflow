@@ -115,6 +115,7 @@ pub fn recv_loop(
                             if n > 0 {
                                 panic!("Clean shutdown followed by data.");
                             }
+                            eprintln!("SHUTDOWNNNNNNNNNNNN");
                             n as isize
                         },
                         Err(err) => match err.kind() {
@@ -248,4 +249,6 @@ pub fn send_loop(
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
+
+    eprintln!("writer done");
 }

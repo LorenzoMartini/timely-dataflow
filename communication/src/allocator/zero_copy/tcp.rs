@@ -257,6 +257,4 @@ pub fn send_loop(
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
-
-    eprintln!("writer done");
 }

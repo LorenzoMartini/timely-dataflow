@@ -111,6 +111,7 @@ pub fn recv_loop(
                     panic!("Clean shutdown followed by data.");
                 }
                 buffer.ensure_capacity(1);
+                reader.set_nonblocking(false);
                 if reader.read(&mut buffer.empty()).expect("read failure") > 0 {
                     panic!("Clean shutdown followed by data.");
                 }
@@ -157,7 +158,6 @@ pub fn recv_loop(
         println!("{:?}", entry);
     }
 
-    reader.set_nonblocking(false);
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: false, }));
 }

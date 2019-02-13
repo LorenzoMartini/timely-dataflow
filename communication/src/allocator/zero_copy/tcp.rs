@@ -45,6 +45,7 @@ pub fn recv_loop(
     // allocation and place the existing Bytes into `self.in_progress`, so that it
     // can be recovered once all readers have read what they need to.
     let mut active = true;
+    let mut hist_lock_all = streaming_harness_hdrhist::HDRHist::new();
 
     while active {
         buffer.ensure_capacity(1);
@@ -94,15 +95,24 @@ pub fn recv_loop(
         }
 
         // Pass bytes along to targets.
+        let t0_lock_all = ticks();
         for (index, staged) in stageds.iter_mut().enumerate() {
             // FIXME: try to merge `staged` before handing it to BytesPush::extend
             use allocator::zero_copy::bytes_exchange::BytesPush;
             targets[index].extend(staged.drain(..));
         }
+        let t1_lock_all = ticks();
+        hist_lock_all.add_value(t1_lock_all - t0_lock_all);
 
     }
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: false, }));
+
+    println!("------------\nLock all summary\n---------------");
+    println!("{}", hist_lock_all.summary_string());
+    for entry in hist_lock_all.ccdf() {
+        println!("{:?}", entry);
+    }
 }
 
 /// Repeatedly sends messages into a TcpStream.
@@ -125,29 +135,13 @@ pub fn send_loop(
     let mut writer = ::std::io::BufWriter::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
 
-
-//    let mut hist_lock = streaming_harness_hdrhist::HDRHist::new();
-//    let mut hist_lock_all = streaming_harness_hdrhist::HDRHist::new();
-    let mut hist_write = streaming_harness_hdrhist::HDRHist::new();
-//    let mut hist_pack = streaming_harness_hdrhist::HDRHist::new();
-    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
-
     while !sources.is_empty() {
 
-        // TODO LOCK
-//        let t0_lock_all = ticks();
         // TODO: Round-robin better, to release resources fairly when overloaded.
         for source in sources.iter_mut() {
             use allocator::zero_copy::bytes_exchange::BytesPull;
-
-//            // TODO LOCK
-//            let t0_lock = ticks();
             source.drain_into(&mut stash);
-//            let t1_lock = ticks();
-//            hist_lock.add_value(t1_lock - t0_lock);
         }
-//        let t1_lock_all = ticks();
-//        hist_lock_all.add_value(t1_lock_all - t0_lock_all);
 
         if stash.is_empty() {
             // No evidence of records to read, but sources not yet empty (at start of loop).
@@ -174,15 +168,7 @@ pub fn send_loop(
                         offset += header.required_bytes();
                     }
                 });
-                let t1_pack = ticks();
-                let n_bytes = bytes.len();
                 writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
-                let t1_write = ticks();
-
-//                // TODO hists add
-//                hist_pack.add_value(t1_pack - t0_lock_all);
-                hist_write.add_value(t1_write - t1_pack);
-                hist_n_bytes.add_value(n_bytes as u64);
             }
         }
     }
@@ -204,20 +190,4 @@ pub fn send_loop(
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
-
-//    println!("------------\nSingle MergeQueue loxk summary\n---------------");
-//    println!("{}", hist_lock.summary_string());
-//    for entry in hist_lock.ccdf() {
-//        println!("{:?}", entry);
-//    }
-    println!("------------\nWrite n_bytes summary\n---------------");
-    println!("{}", hist_n_bytes.summary_string());
-    for entry in hist_n_bytes.ccdf() {
-        println!("{:?}", entry);
-    }    println!("------------\nWrite time summary\n---------------");
-    println!("{}", hist_write.summary_string());
-    for entry in hist_write.ccdf() {
-        println!("{:?}", entry);
-    }
-
 }

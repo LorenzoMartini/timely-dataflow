@@ -128,9 +128,9 @@ pub fn send_loop(
 
     let mut hist_lock = streaming_harness_hdrhist::HDRHist::new();
     let mut hist_lock_group = streaming_harness_hdrhist::HDRHist::new();
-    let mut hist_write = streaming_harness_hdrhist::HDRHist::new();
-    let mut hist_pack = streaming_harness_hdrhist::HDRHist::new();
-    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
+//    let mut hist_write = streaming_harness_hdrhist::HDRHist::new();
+//    let mut hist_pack = streaming_harness_hdrhist::HDRHist::new();
+//    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
     while !sources.is_empty() {
 
@@ -174,15 +174,15 @@ pub fn send_loop(
                         offset += header.required_bytes();
                     }
                 });
-                let t1_pack = ticks();
-                let n_bytes = bytes.len();
+//                let t1_pack = ticks();
+//                let n_bytes = bytes.len();
                 writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
-                let t1_write = ticks();
+//                let t1_write = ticks();
 
-                // TODO hists add
-                hist_pack.add_value(t1_pack - t0_lock_group);
-                hist_write.add_value(t1_write - t1_pack);
-                hist_n_bytes.add_value(n_bytes as u64);
+//                // TODO hists add
+//                hist_pack.add_value(t1_pack - t0_lock_group);
+//                hist_write.add_value(t1_write - t1_pack);
+//                hist_n_bytes.add_value(n_bytes as u64);
             }
         }
     }
@@ -204,16 +204,16 @@ pub fn send_loop(
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
-//
-//    println!("------------\nSingle MergeQueue loxk summary\n---------------");
-//    println!("{}", hist_lock.summary_string());
-//    for entry in hist_lock.ccdf() {
-//        println!("{:?}", entry);
-//    }
-//    println!("------------\nAll MergeQueues lock summary\n---------------");
-//    println!("{}", hist_lock_group.summary_string());
-//    for entry in hist_lock_group.ccdf() {
-//        println!("{:?}", entry);
-//    }
+
+    println!("------------\nSingle MergeQueue loxk summary\n---------------");
+    println!("{}", hist_lock.summary_string());
+    for entry in hist_lock.ccdf() {
+        println!("{:?}", entry);
+    }
+    println!("------------\nAll MergeQueues lock summary\n---------------");
+    println!("{}", hist_lock_group.summary_string());
+    for entry in hist_lock_group.ccdf() {
+        println!("{:?}", entry);
+    }
 
 }

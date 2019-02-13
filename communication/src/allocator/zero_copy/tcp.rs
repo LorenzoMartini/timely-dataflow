@@ -127,9 +127,9 @@ pub fn send_loop(
 
 
 //    let mut hist_lock = streaming_harness_hdrhist::HDRHist::new();
-    let mut hist_lock_all = streaming_harness_hdrhist::HDRHist::new();
+//    let mut hist_lock_all = streaming_harness_hdrhist::HDRHist::new();
 //    let mut hist_write = streaming_harness_hdrhist::HDRHist::new();
-//    let mut hist_pack = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist_pack = streaming_harness_hdrhist::HDRHist::new();
 //    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
     while !sources.is_empty() {
@@ -146,8 +146,8 @@ pub fn send_loop(
 //            let t1_lock = ticks();
 //            hist_lock.add_value(t1_lock - t0_lock);
         }
-        let t1_lock_all = ticks();
-        hist_lock_all.add_value(t1_lock_all - t0_lock_all);
+//        let t1_lock_all = ticks();
+//        hist_lock_all.add_value(t1_lock_all - t0_lock_all);
 
         if stash.is_empty() {
             // No evidence of records to read, but sources not yet empty (at start of loop).
@@ -174,13 +174,13 @@ pub fn send_loop(
                         offset += header.required_bytes();
                     }
                 });
-//                let t1_pack = ticks();
+                let t1_pack = ticks();
 //                let n_bytes = bytes.len();
                 writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
 //                let t1_write = ticks();
 
 //                // TODO hists add
-//                hist_pack.add_value(t1_pack - t0_lock_group);
+                hist_pack.add_value(t1_pack - t0_lock_all);
 //                hist_write.add_value(t1_write - t1_pack);
 //                hist_n_bytes.add_value(n_bytes as u64);
             }
@@ -210,9 +210,9 @@ pub fn send_loop(
 //    for entry in hist_lock.ccdf() {
 //        println!("{:?}", entry);
 //    }
-    println!("------------\nAll MergeQueues lock summary\n---------------");
-    println!("{}", hist_lock_all.summary_string());
-    for entry in hist_lock_all.ccdf() {
+    println!("------------\nPck summary\n---------------");
+    println!("{}", hist_pack.summary_string());
+    for entry in hist_pack.ccdf() {
         println!("{:?}", entry);
     }
 

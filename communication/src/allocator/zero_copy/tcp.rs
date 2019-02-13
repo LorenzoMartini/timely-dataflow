@@ -46,9 +46,6 @@ pub fn recv_loop(
     // can be recovered once all readers have read what they need to.
     let mut active = true;
 
-    let mut hist_lock_group = streaming_harness_hdrhist::HDRHist::new();
-    let mut hist_lock = streaming_harness_hdrhist::HDRHist::new();
-
     while active {
         buffer.ensure_capacity(1);
 
@@ -96,33 +93,14 @@ pub fn recv_loop(
             }
         }
 
-
-        // TODO LOCK
-        let t0_lock_group = ticks();
         // Pass bytes along to targets.
         for (index, staged) in stageds.iter_mut().enumerate() {
             // FIXME: try to merge `staged` before handing it to BytesPush::extend
             use allocator::zero_copy::bytes_exchange::BytesPush;
-            let a = ticks();
             targets[index].extend(staged.drain(..));
-            let b = ticks();
-            hist_lock.add_value(b - a);
         }
-        let t1_lock_group = ticks();
-        hist_lock_group.add_value(t1_lock_group - t0_lock_group);
 
     }
-    println!("------------\nAll MergeQueues lock summary\n---------------");
-    println!("{}", hist_lock_group.summary_string());
-    for entry in hist_lock_group.ccdf() {
-        println!("{:?}", entry);
-    }
-    println!("------------\nOne MergeQueue lock summary\n---------------");
-    println!("{}", hist_lock.summary_string());
-    for entry in hist_lock.ccdf() {
-        println!("{:?}", entry);
-    }
-
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: false, }));
 }
@@ -147,29 +125,29 @@ pub fn send_loop(
     let mut writer = ::std::io::BufWriter::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
 
-//
-//    let mut hist_lock = streaming_harness_hdrhist::HDRHist::new();
-//    let mut hist_lock_group = streaming_harness_hdrhist::HDRHist::new();
-//    let mut hist_write = streaming_harness_hdrhist::HDRHist::new();
-//    let mut hist_pack = streaming_harness_hdrhist::HDRHist::new();
-//    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
+
+    let mut hist_lock = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist_lock_group = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist_write = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist_pack = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
     while !sources.is_empty() {
 
-//        // TODO LOCK
-//        let t0_lock_group = ticks();
+        // TODO LOCK
+        let t0_lock_group = ticks();
         // TODO: Round-robin better, to release resources fairly when overloaded.
         for source in sources.iter_mut() {
             use allocator::zero_copy::bytes_exchange::BytesPull;
-//
-//            // TODO LOCK
-//            let t0_lock = ticks();
+
+            // TODO LOCK
+            let t0_lock = ticks();
             source.drain_into(&mut stash);
-//            let t1_lock = ticks();
-//            hist_lock.add_value(t1_lock - t0_lock);
+            let t1_lock = ticks();
+            hist_lock.add_value(t1_lock - t0_lock);
         }
-//        let t1_lock_group = ticks();
-//        hist_lock_group.add_value(t1_lock_group - t0_lock_group);
+        let t1_lock_group = ticks();
+        hist_lock_group.add_value(t1_lock_group - t0_lock_group);
 
         if stash.is_empty() {
             // No evidence of records to read, but sources not yet empty (at start of loop).
@@ -196,15 +174,15 @@ pub fn send_loop(
                         offset += header.required_bytes();
                     }
                 });
-//                let t1_pack = ticks();
-//                let n_bytes = bytes.len();
+                let t1_pack = ticks();
+                let n_bytes = bytes.len();
                 writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
-//                let t1_write = ticks();
+                let t1_write = ticks();
 
-//                // TODO hists add
-//                hist_pack.add_value(t1_pack - t0_lock_group);
-//                hist_write.add_value(t1_write - t1_pack);
-//                hist_n_bytes.add_value(n_bytes as u64);
+                // TODO hists add
+                hist_pack.add_value(t1_pack - t0_lock_group);
+                hist_write.add_value(t1_write - t1_pack);
+                hist_n_bytes.add_value(n_bytes as u64);
             }
         }
     }

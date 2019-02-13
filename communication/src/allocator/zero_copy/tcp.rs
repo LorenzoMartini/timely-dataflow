@@ -127,7 +127,7 @@ pub fn send_loop(
 
 
     let mut hist_lock = streaming_harness_hdrhist::HDRHist::new();
-    let mut hist_lock_group = streaming_harness_hdrhist::HDRHist::new();
+//    let mut hist_lock_group = streaming_harness_hdrhist::HDRHist::new();
 //    let mut hist_write = streaming_harness_hdrhist::HDRHist::new();
 //    let mut hist_pack = streaming_harness_hdrhist::HDRHist::new();
 //    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
@@ -135,7 +135,7 @@ pub fn send_loop(
     while !sources.is_empty() {
 
         // TODO LOCK
-        let t0_lock_group = ticks();
+//        let t0_lock_all = ticks();
         // TODO: Round-robin better, to release resources fairly when overloaded.
         for source in sources.iter_mut() {
             use allocator::zero_copy::bytes_exchange::BytesPull;
@@ -146,8 +146,8 @@ pub fn send_loop(
             let t1_lock = ticks();
             hist_lock.add_value(t1_lock - t0_lock);
         }
-        let t1_lock_group = ticks();
-        hist_lock_group.add_value(t1_lock_group - t0_lock_group);
+//        let t1_lock_all = ticks();
+//        hist_lock_all.add_value(t1_lock_all - t0_lock_all);
 
         if stash.is_empty() {
             // No evidence of records to read, but sources not yet empty (at start of loop).
@@ -210,10 +210,10 @@ pub fn send_loop(
     for entry in hist_lock.ccdf() {
         println!("{:?}", entry);
     }
-    println!("------------\nAll MergeQueues lock summary\n---------------");
-    println!("{}", hist_lock_group.summary_string());
-    for entry in hist_lock_group.ccdf() {
-        println!("{:?}", entry);
-    }
+//    println!("------------\nAll MergeQueues lock summary\n---------------");
+//    println!("{}", hist_lock_group.summary_string());
+//    for entry in hist_lock_group.ccdf() {
+//        println!("{:?}", entry);
+//    }
 
 }

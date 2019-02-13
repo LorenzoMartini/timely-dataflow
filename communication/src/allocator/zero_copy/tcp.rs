@@ -128,14 +128,14 @@ pub fn send_loop(
 
 //    let mut hist_lock = streaming_harness_hdrhist::HDRHist::new();
 //    let mut hist_lock_all = streaming_harness_hdrhist::HDRHist::new();
-//    let mut hist_write = streaming_harness_hdrhist::HDRHist::new();
-    let mut hist_pack = streaming_harness_hdrhist::HDRHist::new();
-//    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist_write = streaming_harness_hdrhist::HDRHist::new();
+//    let mut hist_pack = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
     while !sources.is_empty() {
 
         // TODO LOCK
-        let t0_lock_all = ticks();
+//        let t0_lock_all = ticks();
         // TODO: Round-robin better, to release resources fairly when overloaded.
         for source in sources.iter_mut() {
             use allocator::zero_copy::bytes_exchange::BytesPull;
@@ -175,14 +175,14 @@ pub fn send_loop(
                     }
                 });
                 let t1_pack = ticks();
-//                let n_bytes = bytes.len();
+                let n_bytes = bytes.len();
                 writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
-//                let t1_write = ticks();
+                let t1_write = ticks();
 
 //                // TODO hists add
-                hist_pack.add_value(t1_pack - t0_lock_all);
-//                hist_write.add_value(t1_write - t1_pack);
-//                hist_n_bytes.add_value(n_bytes as u64);
+//                hist_pack.add_value(t1_pack - t0_lock_all);
+                hist_write.add_value(t1_write - t1_pack);
+                hist_n_bytes.add_value(n_bytes as u64);
             }
         }
     }
@@ -210,9 +210,13 @@ pub fn send_loop(
 //    for entry in hist_lock.ccdf() {
 //        println!("{:?}", entry);
 //    }
-    println!("------------\nPck summary\n---------------");
-    println!("{}", hist_pack.summary_string());
-    for entry in hist_pack.ccdf() {
+    println!("------------\nWrite n_bytes summary\n---------------");
+    println!("{}", hist_n_bytes.summary_string());
+    for entry in hist_n_bytes.ccdf() {
+        println!("{:?}", entry);
+    }    println!("------------\nWrite time summary\n---------------");
+    println!("{}", hist_write.summary_string());
+    for entry in hist_write.ccdf() {
         println!("{:?}", entry);
     }
 

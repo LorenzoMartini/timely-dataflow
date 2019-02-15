@@ -77,6 +77,7 @@ pub fn recv_loop(
         }
         let t1 = ticks();
         hist.add_value(t1 - t0);
+        peinrln!("READ {} in {} ns", read, t1 - t0);
 
         assert!(read > 0);
         buffer.make_valid(read);

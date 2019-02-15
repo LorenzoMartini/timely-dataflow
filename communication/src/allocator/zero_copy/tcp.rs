@@ -48,6 +48,7 @@ pub fn recv_loop(
     let mut active = true;
     let mut hist = streaming_harness_hdrhist::HDRHist::new();
 
+    let mut counterz: usize = 0;
     while active {
         buffer.ensure_capacity(1);
 
@@ -56,12 +57,13 @@ pub fn recv_loop(
         // Attempt to read some more bytes into self.buffer.
         let mut read = 0;
         let mut t0 = ticks();
-        reader.set_nodelay(true);
+        reader.set_nonblocking(true);
         while read <= 0 {
             read = match reader.read(&mut buffer.empty()) {
                 Ok(n) => n,
                 Err(x) => match x.kind() {
                     WouldBlock => {
+                        counterz+=1;
                         t0 = ticks();
                         0
                     },
@@ -129,7 +131,7 @@ pub fn recv_loop(
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: false, }));
 
-    println!("------------\nRead summary\n---------------");
+    println!("------------\nRead summary\n---------------{}", counterz);
     println!("{}", hist.summary_string());
     for entry in hist.ccdf() {
         println!("{:?}", entry);

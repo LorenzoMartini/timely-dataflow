@@ -85,6 +85,7 @@ pub fn start_connections(addresses: Arc<Vec<String>>, my_index: usize, noisy: bo
             match TcpStream::connect(&addresses[index][..]) {
                 Ok(mut stream) => {
                     stream.set_nodelay(true).expect("set_nodelay call failed");
+                    stream.set_nonblocking(true).expect("set_nonblocking call failed");
                     unsafe { encode(&(my_index as u64), &mut stream) }.expect("failed to encode/send worker index");
                     results[index as usize] = Some(stream);
                     if noisy { println!("worker {}:\tconnection to worker {}", my_index, index); }

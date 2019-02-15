@@ -6,6 +6,7 @@ use std::net::TcpStream;
 use self::amd64_timer::ticks;
 use networking::MessageHeader;
 
+use std::io::ErrorKind::WouldBlock;
 use super::bytes_slab::BytesSlab;
 use super::bytes_exchange::{MergeQueue, Signal};
 
@@ -45,7 +46,7 @@ pub fn recv_loop(
     // allocation and place the existing Bytes into `self.in_progress`, so that it
     // can be recovered once all readers have read what they need to.
     let mut active = true;
-    let mut hist_lock_all = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist = streaming_harness_hdrhist::HDRHist::new();
 
     while active {
         buffer.ensure_capacity(1);
@@ -53,14 +54,26 @@ pub fn recv_loop(
         assert!(!buffer.empty().is_empty());
 
         // Attempt to read some more bytes into self.buffer.
-        let read = match reader.read(&mut buffer.empty()) {
-            Ok(n) => n,
-            Err(x) => {
-                // We don't expect this, as socket closure results in Ok(0) reads.
-                println!("Error: {:?}", x);
-                0
-            },
-        };
+        let mut read = 0;
+        let mut t0 = ticks();
+        while read <= 0 {
+            read = match reader.read(&mut buffer.empty()) {
+                Ok(n) => n,
+                Err(x) => match x.kind() {
+                    WouldBlock => {
+                        t0 = ticks();
+                        0
+                    },
+                    // We don't expect this, as socket closure results in Ok(0) reads.
+                    _ => {
+                        println!("Error: {:?}", x);
+                        0
+                    }
+                },
+            };
+        }
+        let t1 = ticks();
+        hist.add_value(t1 - t0);
 
         assert!(read > 0);
         buffer.make_valid(read);
@@ -88,29 +101,36 @@ pub fn recv_loop(
                 buffer.ensure_capacity(1);
 
                 // Shutdown
-                if reader.read(&mut buffer.empty()).expect("Error occurred while shutting down stream") > 0 {
-                    panic!("Clean shutdown followed by data.");
+                let mut read = -1;
+                while read <= -1 {
+                    read = match reader.read(&mut buffer.empty()) {
+                        Ok(n) => n as isize,
+                        Err(err) => match err.kind() {
+                            WouldBlock => -1,
+                            _ => panic!("Error occurred while shutting down stream")
+                        }
+                    }
+                }
+                if read > 0 {
+                    panic!("Clean shutdown followed by data");
                 }
             }
         }
 
         // Pass bytes along to targets.
-        let t0_lock_all = ticks();
         for (index, staged) in stageds.iter_mut().enumerate() {
             // FIXME: try to merge `staged` before handing it to BytesPush::extend
             use allocator::zero_copy::bytes_exchange::BytesPush;
             targets[index].extend(staged.drain(..));
         }
-        let t1_lock_all = ticks();
-        hist_lock_all.add_value(t1_lock_all - t0_lock_all);
 
     }
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: false, }));
 
-    println!("------------\nLock all summary\n---------------");
-    println!("{}", hist_lock_all.summary_string());
-    for entry in hist_lock_all.ccdf() {
+    println!("------------\nRead summary\n---------------");
+    println!("{}", hist.summary_string());
+    for entry in hist.ccdf() {
         println!("{:?}", entry);
     }
 }
@@ -150,7 +170,16 @@ pub fn send_loop(
             // still be a signal incoming.
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
-            writer.flush().expect("Failed to flush writer.");
+            let mut flushed = false;
+            while !flushed {
+                match writer.flush() {
+                    Ok(_) => flushed = true,
+                    Err(err) => match err.kind() {
+                        WouldBlock => (),
+                        _ => panic!("Fail flush")
+                    }
+                }
+            }
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
                 signal.wait();
@@ -168,7 +197,16 @@ pub fn send_loop(
                         offset += header.required_bytes();
                     }
                 });
-                writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
+                let mut written = false;
+                while !written {
+                    match writer.write_all(&bytes[..]) {
+                        Ok(_) => written = true,
+                        Err(err) => match err.kind() {
+                            WouldBlock => (),
+                            _ => panic!("Write failure in send_loop.")
+                        }
+                    }
+                }
             }
         }
     }
@@ -184,7 +222,16 @@ pub fn send_loop(
         seqno:      0,
     };
     header.write_to(&mut writer).expect("Failed to write header!");
-    writer.flush().expect("Failed to flush writer");
+    let mut flushed = false;
+    while !flushed {
+        match writer.flush() {
+            Ok(_) => flushed = true,
+            Err(err) => match err.kind() {
+                WouldBlock => (),
+                _ => panic!("Fail flush")
+            }
+        }
+    }
     writer.get_mut().shutdown(::std::net::Shutdown::Write).expect("Write shutdown failed");
     logger.as_mut().map(|logger| logger.log(MessageEvent { is_send: true, header }));
 

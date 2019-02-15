@@ -56,13 +56,13 @@ pub fn recv_loop(
         // Attempt to read some more bytes into self.buffer.
         let mut read = 0;
         let mut t0 = ticks();
+        reader.set_nodelay(true);
         while read <= 0 {
             read = match reader.read(&mut buffer.empty()) {
                 Ok(n) => n,
                 Err(x) => match x.kind() {
                     WouldBlock => {
                         t0 = ticks();
-                        println!("X");
                         0
                     },
                     // We don't expect this, as socket closure results in Ok(0) reads.

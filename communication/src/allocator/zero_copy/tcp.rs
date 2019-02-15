@@ -62,6 +62,7 @@ pub fn recv_loop(
                 Err(x) => match x.kind() {
                     WouldBlock => {
                         t0 = ticks();
+                        println!("X");
                         0
                     },
                     // We don't expect this, as socket closure results in Ok(0) reads.

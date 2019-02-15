@@ -47,6 +47,7 @@ pub fn recv_loop(
     // can be recovered once all readers have read what they need to.
     let mut active = true;
     let mut hist = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
     let mut counterz: usize = 0;
     while active {
@@ -57,7 +58,7 @@ pub fn recv_loop(
         // Attempt to read some more bytes into self.buffer.
         let mut read = 0;
         let mut t0 = ticks();
-        reader.set_nonblocking(true);
+        reader.set_nonblocking(true).expect("OPS");
         while read <= 0 {
             read = match reader.read(&mut buffer.empty()) {
                 Ok(n) => n,
@@ -77,7 +78,8 @@ pub fn recv_loop(
         }
         let t1 = ticks();
         hist.add_value(t1 - t0);
-        peinrln!("READ {} in {} ns", read, t1 - t0);
+        hist_n_bytes.add_value(read as u64);
+        println!("READ {} in {} ns", read, t1 - t0);
 
         assert!(read > 0);
         buffer.make_valid(read);
@@ -135,6 +137,11 @@ pub fn recv_loop(
     println!("------------\nRead summary\n---------------{}", counterz);
     println!("{}", hist.summary_string());
     for entry in hist.ccdf() {
+        println!("{:?}", entry);
+    }
+    println!("------------\nbytes summary\n---------------{}", counterz);
+    println!("{}", hist_n_bytes.summary_string());
+    for entry in hist_n_bytes.ccdf() {
         println!("{:?}", entry);
     }
 }

@@ -79,7 +79,6 @@ pub fn recv_loop(
         let t1 = ticks();
         hist.add_value(t1 - t0);
         hist_n_bytes.add_value(read as u64);
-        println!("READ {} in {} ns", read, t1 - t0);
 
         assert!(read > 0);
         buffer.make_valid(read);

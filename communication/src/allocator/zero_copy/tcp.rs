@@ -158,7 +158,7 @@ pub fn send_loop(
             // still be a signal incoming.
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
-            writer.flush().expect("Failed to flush writer.");
+            writer.flush_and_time().expect("Failed to flush writer.");
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
                 signal.wait();
@@ -211,7 +211,7 @@ struct MyBuf {
 impl MyBuf {
     fn write_all(&mut self, mut buf: &[u8]) -> io::Result<()> {
         while !buf.is_empty() {
-            match self.write(buf) {
+            match self.write_and_time(buf) {
                 Ok(0) => return Err(Error::new(ErrorKind::WriteZero,
                                                "failed to write whole buffer")),
                 Ok(n) => buf = &buf[n..],
@@ -258,6 +258,23 @@ impl MyBuf {
     }
 
     pub fn get_mut(&mut self) -> &mut TcpStream { self.inner.as_mut().unwrap() }
+
+    fn write_and_time(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.buf.len() + buf.len() > self.buf.capacity() {
+            self.flush_buf()?;
+        }
+        if buf.len() >= self.buf.capacity() {
+            self.panicked = true;
+            let r = self.inner.as_mut().unwrap().write(buf);
+            self.panicked = false;
+            r
+        } else {
+            Write::write(&mut self.buf, buf)
+        }
+    }
+    fn flush_and_time(&mut self) -> io::Result<()> {
+        self.flush_buf().and_then(|()| self.get_mut().flush())
+    }
 }
 
 impl Write for MyBuf {

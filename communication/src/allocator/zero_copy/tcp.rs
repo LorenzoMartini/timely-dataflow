@@ -48,8 +48,6 @@ pub fn recv_loop(
     // allocation and place the existing Bytes into `self.in_progress`, so that it
     // can be recovered once all readers have read what they need to.
     let mut active = true;
-    let mut hist = streaming_harness_hdrhist::HDRHist::new();
-    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
     while active {
         buffer.ensure_capacity(1);
@@ -57,7 +55,6 @@ pub fn recv_loop(
         assert!(!buffer.empty().is_empty());
 
         // Attempt to read some more bytes into self.buffer.
-        let t0 = ticks();
         let read = match reader.read(&mut buffer.empty()) {
             Ok(n) => n,
             Err(x) => {
@@ -66,9 +63,6 @@ pub fn recv_loop(
                 0
             },
         };
-        let t1 = ticks();
-        hist.add_value(t1 - t0);
-        hist_n_bytes.add_value(read as u64);
 
         assert!(read > 0);
         buffer.make_valid(read);
@@ -110,17 +104,6 @@ pub fn recv_loop(
     }
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: false, }));
-
-    println!("------------\nRead summary\n---------------");
-    println!("{}", hist.summary_string());
-    for entry in hist.ccdf() {
-        println!("{:?}", entry);
-    }
-    println!("------------\nbytes summary\n---------------");
-    println!("{}", hist_n_bytes.summary_string());
-    for entry in hist_n_bytes.ccdf() {
-        println!("{:?}", entry);
-    }
 }
 
 /// Repeatedly sends messages into a TcpStream.
@@ -142,6 +125,8 @@ pub fn send_loop(
 
     let mut writer = MyBuf::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
+    let mut hist = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
     while !sources.is_empty() {
 
@@ -202,6 +187,17 @@ pub fn send_loop(
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
+
+    println!("------------\nWrite summary\n---------------");
+    println!("{}", hist.summary_string());
+    for entry in hist.ccdf() {
+        println!("{:?}", entry);
+    }
+    println!("------------\nbytes summary\n---------------");
+    println!("{}", hist_n_bytes.summary_string());
+    for entry in hist_n_bytes.ccdf() {
+        println!("{:?}", entry);
+    }
 }
 
 

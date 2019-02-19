@@ -12,6 +12,9 @@ use super::bytes_exchange::{MergeQueue, Signal};
 use logging_core::Logger;
 
 use ::logging::{CommunicationEvent, CommunicationSetup, MessageEvent, StateEvent};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io;
 
 /// Repeatedly reads from a TcpStream and carves out messages.
 ///
@@ -137,7 +140,7 @@ pub fn send_loop(
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: true, }));
 
-    let mut writer = ::std::io::BufWriter::with_capacity(1 << 16, writer);
+    let mut writer = MyBuf::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
 
     while !sources.is_empty() {
@@ -196,4 +199,82 @@ pub fn send_loop(
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
+}
+
+
+struct MyBuf {
+    inner: Option<TcpStream>,
+    buf: Vec<u8>,
+    panicked: bool,
+}
+
+impl MyBuf {
+    fn write_all(&mut self, mut buf: &[u8]) -> io::Result<()> {
+        while !buf.is_empty() {
+            match self.write(buf) {
+                Ok(0) => return Err(Error::new(ErrorKind::WriteZero,
+                                               "failed to write whole buffer")),
+                Ok(n) => buf = &buf[n..],
+                Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn with_capacity(cap: usize, inner: TcpStream) -> MyBuf {
+        MyBuf {
+            inner: Some(inner),
+            buf: Vec::with_capacity(cap),
+            panicked: false,
+        }
+    }
+
+    fn flush_buf(&mut self) -> io::Result<()> {
+        let mut written = 0;
+        let len = self.buf.len();
+        let mut ret = Ok(());
+        while written < len {
+            self.panicked = true;
+            let r = self.inner.as_mut().unwrap().write(&self.buf[written..]);
+            self.panicked = false;
+
+            match r {
+                Ok(0) => {
+                    ret = Err(Error::new(ErrorKind::WriteZero,
+                                         "failed to write the buffered data"));
+                    break;
+                }
+                Ok(n) => written += n,
+                Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => { ret = Err(e); break }
+
+            }
+        }
+        if written > 0 {
+            self.buf.drain(..written);
+        }
+        ret
+    }
+
+    pub fn get_mut(&mut self) -> &mut TcpStream { self.inner.as_mut().unwrap() }
+}
+
+impl Write for MyBuf {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.buf.len() + buf.len() > self.buf.capacity() {
+            self.flush_buf()?;
+        }
+        if buf.len() >= self.buf.capacity() {
+            self.panicked = true;
+            let r = self.inner.as_mut().unwrap().write(buf);
+            self.panicked = false;
+            r
+        } else {
+            Write::write(&mut self.buf, buf)
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.flush_buf().and_then(|()| self.get_mut().flush())
+    }
 }

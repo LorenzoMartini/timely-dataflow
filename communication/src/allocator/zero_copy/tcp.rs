@@ -15,6 +15,7 @@ use ::logging::{CommunicationEvent, CommunicationSetup, MessageEvent, StateEvent
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io;
+use std::collections::VecDeque;
 
 /// Repeatedly reads from a TcpStream and carves out messages.
 ///
@@ -128,12 +129,15 @@ pub fn send_loop(
     let mut hist = streaming_harness_hdrhist::HDRHist::new();
     let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
+    let mut times: VecDeque<u64> = VecDeque::new();
+
     while !sources.is_empty() {
 
         // TODO: Round-robin better, to release resources fairly when overloaded.
         for source in sources.iter_mut() {
             use allocator::zero_copy::bytes_exchange::BytesPull;
             source.drain_into(&mut stash);
+            times.push_back(ticks());
         }
 
         if stash.is_empty() {
@@ -143,7 +147,11 @@ pub fn send_loop(
             // still be a signal incoming.
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
-            writer.flush_and_time().expect("Failed to flush writer.");
+            let t1 = ticks();
+            writer.flush().expect("Failed to flush writer.");
+            while !times.is_empty() {
+                hist.add_value(t1 - times.pop_front().unwrap());
+            }
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
                 signal.wait();
@@ -164,7 +172,7 @@ pub fn send_loop(
 
                     let flushed = writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
                     if flushed {
-                        println!("FLUSHED");
+                        panic!("FLUSHED out of flushing");
                     }
                 }
             }
@@ -277,9 +285,6 @@ impl MyBuf {
         } else {
             Write::write(&mut self.buf, buf).map(|result| (result, false))
         }
-    }
-    fn flush_and_time(&mut self) -> io::Result<()> {
-        self.flush_buf().and_then(|()| self.get_mut().flush())
     }
 }
 

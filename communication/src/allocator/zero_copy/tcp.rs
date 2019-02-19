@@ -15,7 +15,6 @@ use ::logging::{CommunicationEvent, CommunicationSetup, MessageEvent, StateEvent
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io;
-use std::collections::VecDeque;
 
 /// Repeatedly reads from a TcpStream and carves out messages.
 ///
@@ -127,22 +126,14 @@ pub fn send_loop(
     let mut writer = MyBuf::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
     let mut hist = streaming_harness_hdrhist::HDRHist::new();
-    //let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
-
-    let mut times: VecDeque<u64> = VecDeque::new();
+    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
     while !sources.is_empty() {
 
-        let mut len = stash.len();
         // TODO: Round-robin better, to release resources fairly when overloaded.
         for source in sources.iter_mut() {
             use allocator::zero_copy::bytes_exchange::BytesPull;
             source.drain_into(&mut stash);
-            if stash.len() > len {
-                // Pushed something => insert t0 in queue
-                times.push_back(ticks());
-                len = stash.len();
-            }
         }
 
         if stash.is_empty() {
@@ -152,13 +143,10 @@ pub fn send_loop(
             // still be a signal incoming.
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
-            let t1 = ticks();
-            let sent = writer.flush_and_count().expect("Failed to flush writer.") as u64;
-//            if sent > 0 {
-//                hist_n_bytes.add_value(sent);
-//            }
-            while !times.is_empty() {
-                hist.add_value(t1 - times.pop_front().unwrap());
+            let (sent, time) = writer.flush_and_count().expect("Failed to flush writer.");
+            if sent > 0 {
+                hist_n_bytes.add_value(sent as u64);
+                hist.add_value(time);
             }
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
@@ -206,16 +194,16 @@ pub fn send_loop(
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
 
-    println!("------------\nWrite delay summary\n---------------");
+    println!("------------\nTCPWrite summary\n---------------");
     println!("{}", hist.summary_string());
     for entry in hist.ccdf() {
         println!("{:?}", entry);
     }
-//    println!("------------\nbytes summary\n---------------");
-//    println!("{}", hist_n_bytes.summary_string());
-//    for entry in hist_n_bytes.ccdf() {
-//        println!("{:?}", entry);
-//    }
+    println!("------------\nbytes summary\n---------------");
+    println!("{}", hist_n_bytes.summary_string());
+    for entry in hist_n_bytes.ccdf() {
+        println!("{:?}", entry);
+    }
 }
 
 
@@ -296,10 +284,11 @@ impl MyBuf {
             Write::write(&mut self.buf, buf).map(|result| (result, false))
         }
     }
-    fn flush_and_count(&mut self) -> io::Result<(usize)> {
+    fn flush_and_count(&mut self) -> io::Result<(usize, u64)> {
         let len = self.buf.len();
+        let t0 = ticks();
         self.flush_buf().and_then(|()| self.get_mut().flush());
-        Ok(len)
+        Ok((len, ticks() - t0))
     }
 }
 

@@ -133,11 +133,16 @@ pub fn send_loop(
 
     while !sources.is_empty() {
 
+        let mut len = stash.len();
         // TODO: Round-robin better, to release resources fairly when overloaded.
         for source in sources.iter_mut() {
             use allocator::zero_copy::bytes_exchange::BytesPull;
             source.drain_into(&mut stash);
-            times.push_back(ticks());
+            if stash.len() > len {
+                // Pushed something => insert t0 in queue
+                times.push_back(ticks());
+                len = stash.len();
+            }
         }
 
         if stash.is_empty() {

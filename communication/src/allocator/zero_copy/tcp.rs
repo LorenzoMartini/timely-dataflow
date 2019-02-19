@@ -153,7 +153,10 @@ pub fn send_loop(
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
             let t1 = ticks();
-            hist_n_bytes.add_value(writer.flush_and_count().expect("Failed to flush writer.") as u64);
+            let sent = writer.flush_and_count().expect("Failed to flush writer.") as u64;
+            if sent > 0 {
+                hist_n_bytes.add_value(sent);
+            }
             while !times.is_empty() {
                 hist.add_value(t1 - times.pop_front().unwrap());
             }

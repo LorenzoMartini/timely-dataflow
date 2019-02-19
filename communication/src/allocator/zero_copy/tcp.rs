@@ -153,7 +153,7 @@ pub fn send_loop(
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
             let t1 = ticks();
-            writer.flush().expect("Failed to flush writer.");
+            hist_n_bytes.add_value(writer.flush_and_count().expect("Failed to flush writer.") as u64);
             while !times.is_empty() {
                 hist.add_value(t1 - times.pop_front().unwrap());
             }
@@ -290,6 +290,11 @@ impl MyBuf {
         } else {
             Write::write(&mut self.buf, buf).map(|result| (result, false))
         }
+    }
+    fn flush_and_count(&mut self) -> io::Result<(usize)> {
+        let len = self.buf.len();
+        self.flush_buf().and_then(|()| self.get_mut().flush());
+        Ok(len)
     }
 }
 

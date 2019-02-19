@@ -126,7 +126,8 @@ pub fn send_loop(
     let mut writer = MyBuf::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
     let mut hist = streaming_harness_hdrhist::HDRHist::new();
-    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
+    let mut counter = 0;
+
 
     while !sources.is_empty() {
 
@@ -143,17 +144,18 @@ pub fn send_loop(
             // still be a signal incoming.
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
-            let (sent, time) = writer.flush_and_count().expect("Failed to flush writer.");
+            let sent = writer.flush_and_count().expect("Failed to flush writer.");
             if sent > 0 {
-                hist_n_bytes.add_value(sent as u64);
-                hist.add_value(time);
+                hist.add_value(counter);
             }
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
                 signal.wait();
             }
+            counter = 0;
         }
             else {
+                counter += 1;
                 // TODO: Could do scatter/gather write here.
                 for mut bytes in stash.drain(..) {
 
@@ -194,14 +196,9 @@ pub fn send_loop(
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
 
-    println!("------------\nTCPWrite summary\n---------------");
+    println!("------------\nCount rounds summary\n---------------");
     println!("{}", hist.summary_string());
     for entry in hist.ccdf() {
-        println!("{:?}", entry);
-    }
-    println!("------------\nbytes summary\n---------------");
-    println!("{}", hist_n_bytes.summary_string());
-    for entry in hist_n_bytes.ccdf() {
         println!("{:?}", entry);
     }
 }
@@ -284,11 +281,10 @@ impl MyBuf {
             Write::write(&mut self.buf, buf).map(|result| (result, false))
         }
     }
-    fn flush_and_count(&mut self) -> io::Result<(usize, u64)> {
+    fn flush_and_count(&mut self) -> io::Result<usize> {
         let len = self.buf.len();
-        let t0 = ticks();
         self.flush_buf().and_then(|()| self.get_mut().flush());
-        Ok((len, ticks() - t0))
+        Ok(len)
     }
 }
 

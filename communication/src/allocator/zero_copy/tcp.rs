@@ -180,6 +180,8 @@ pub fn send_loop(
 
                     let flushed = writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
                     if flushed {
+                        // Don't bother measuring this flush, it never happens.
+                        // If for some reason it happens just repeat experiment
                         panic!("FLUSHED out of flushing");
                     }
                 }

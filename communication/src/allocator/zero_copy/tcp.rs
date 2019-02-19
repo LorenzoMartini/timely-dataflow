@@ -216,7 +216,10 @@ impl MyBuf {
                                                "failed to write whole buffer")),
                 Ok((n, flushed)) => {
                     buf = &buf[n..];
-                    flush = flushed;
+                    if !flush {
+                        // Check a one time flush
+                        flush = flushed;
+                    }
                 },
                 Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
                 Err(e) => return Err(e),

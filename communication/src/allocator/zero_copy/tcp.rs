@@ -127,7 +127,7 @@ pub fn send_loop(
     let mut writer = MyBuf::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
     let mut hist = streaming_harness_hdrhist::HDRHist::new();
-    let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
+    //let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
     let mut times: VecDeque<u64> = VecDeque::new();
 
@@ -154,9 +154,9 @@ pub fn send_loop(
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
             let t1 = ticks();
             let sent = writer.flush_and_count().expect("Failed to flush writer.") as u64;
-            if sent > 0 {
-                hist_n_bytes.add_value(sent);
-            }
+//            if sent > 0 {
+//                hist_n_bytes.add_value(sent);
+//            }
             while !times.is_empty() {
                 hist.add_value(t1 - times.pop_front().unwrap());
             }
@@ -206,16 +206,16 @@ pub fn send_loop(
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
 
-    println!("------------\nWrite summary\n---------------");
+    println!("------------\nWrite delay summary\n---------------");
     println!("{}", hist.summary_string());
     for entry in hist.ccdf() {
         println!("{:?}", entry);
     }
-    println!("------------\nbytes summary\n---------------");
-    println!("{}", hist_n_bytes.summary_string());
-    for entry in hist_n_bytes.ccdf() {
-        println!("{:?}", entry);
-    }
+//    println!("------------\nbytes summary\n---------------");
+//    println!("{}", hist_n_bytes.summary_string());
+//    for entry in hist_n_bytes.ccdf() {
+//        println!("{:?}", entry);
+//    }
 }
 
 

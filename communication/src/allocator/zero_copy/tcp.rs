@@ -177,7 +177,10 @@ pub fn send_loop(
                         }
                     });
 
-                    writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
+                    let flushed = writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
+                    if flushed {
+                        println!("FLUSHED");
+                    }
                 }
             }
     }
@@ -209,17 +212,21 @@ struct MyBuf {
 }
 
 impl MyBuf {
-    fn write_all(&mut self, mut buf: &[u8]) -> io::Result<()> {
+    fn write_all(&mut self, mut buf: &[u8]) -> io::Result<bool> {
+        let mut flush = false;
         while !buf.is_empty() {
             match self.write_and_time(buf) {
-                Ok(0) => return Err(Error::new(ErrorKind::WriteZero,
+                Ok((0, _)) => return Err(Error::new(ErrorKind::WriteZero,
                                                "failed to write whole buffer")),
-                Ok(n) => buf = &buf[n..],
+                Ok((n, flushed)) => {
+                    buf = &buf[n..];
+                    flush = flushed;
+                },
                 Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
                 Err(e) => return Err(e),
             }
         }
-        Ok(())
+        Ok(flush)
     }
 
     pub fn with_capacity(cap: usize, inner: TcpStream) -> MyBuf {
@@ -259,7 +266,7 @@ impl MyBuf {
 
     pub fn get_mut(&mut self) -> &mut TcpStream { self.inner.as_mut().unwrap() }
 
-    fn write_and_time(&mut self, buf: &[u8]) -> io::Result<usize> {
+    fn write_and_time(&mut self, buf: &[u8]) -> io::Result<(usize, bool)> {
         if self.buf.len() + buf.len() > self.buf.capacity() {
             self.flush_buf()?;
         }
@@ -267,9 +274,9 @@ impl MyBuf {
             self.panicked = true;
             let r = self.inner.as_mut().unwrap().write(buf);
             self.panicked = false;
-            r
+            r.map(|result| (result, true))
         } else {
-            Write::write(&mut self.buf, buf)
+            Write::write(&mut self.buf, buf).map(|result| (result, false))
         }
     }
     fn flush_and_time(&mut self) -> io::Result<()> {

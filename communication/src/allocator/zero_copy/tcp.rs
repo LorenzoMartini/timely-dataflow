@@ -1,9 +1,6 @@
-//!
-extern crate streaming_harness_hdrhist;
-extern crate amd64_timer;
+//!\
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use self::amd64_timer::ticks;
 use networking::MessageHeader;
 
 use super::bytes_slab::BytesSlab;
@@ -12,9 +9,6 @@ use super::bytes_exchange::{MergeQueue, Signal};
 use logging_core::Logger;
 
 use ::logging::{CommunicationEvent, CommunicationSetup, MessageEvent, StateEvent};
-use std::io::Error;
-use std::io::ErrorKind;
-use std::io;
 
 /// Repeatedly reads from a TcpStream and carves out messages.
 ///
@@ -123,11 +117,8 @@ pub fn send_loop(
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: true, }));
 
-    let mut writer = MyBuf::with_capacity(1 << 16, writer);
+    let mut writer = ::std::io::BufWriter::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
-    let mut hist = streaming_harness_hdrhist::HDRHist::new();
-    let mut counter = 0;
-
 
     while !sources.is_empty() {
 
@@ -144,18 +135,14 @@ pub fn send_loop(
             // still be a signal incoming.
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
-            let sent = writer.flush_and_count().expect("Failed to flush writer.");
-            if sent > 0 {
-                hist.add_value(counter);
-            }
+            writer.flush().expect("Failed to flush writer.");
+
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
                 signal.wait();
             }
-            counter = 0;
         }
             else {
-                counter += 1;
                 // TODO: Could do scatter/gather write here.
                 for mut bytes in stash.drain(..) {
 
@@ -167,13 +154,7 @@ pub fn send_loop(
                             offset += header.required_bytes();
                         }
                     });
-
-                    let flushed = writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
-                    if flushed {
-                        // Don't bother measuring this flush, it never happens.
-                        // If for some reason it happens just repeat experiment
-                        panic!("FLUSHED out of flushing");
-                    }
+                    writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
                 }
             }
     }
@@ -195,114 +176,4 @@ pub fn send_loop(
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
-
-    println!("------------\nCount rounds summary\n---------------");
-    println!("{}", hist.summary_string());
-    for entry in hist.ccdf() {
-        println!("{:?}", entry);
-    }
-}
-
-
-struct MyBuf {
-    inner: Option<TcpStream>,
-    buf: Vec<u8>,
-    panicked: bool,
-}
-
-impl MyBuf {
-    fn write_all(&mut self, mut buf: &[u8]) -> io::Result<bool> {
-        let mut flush = false;
-        while !buf.is_empty() {
-            match self.write_and_time(buf) {
-                Ok((0, _)) => return Err(Error::new(ErrorKind::WriteZero,
-                                               "failed to write whole buffer")),
-                Ok((n, flushed)) => {
-                    buf = &buf[n..];
-                    if !flush {
-                        // Check a one time flush
-                        flush = flushed;
-                    }
-                },
-                Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
-                Err(e) => return Err(e),
-            }
-        }
-        Ok(flush)
-    }
-
-    pub fn with_capacity(cap: usize, inner: TcpStream) -> MyBuf {
-        MyBuf {
-            inner: Some(inner),
-            buf: Vec::with_capacity(cap),
-            panicked: false,
-        }
-    }
-
-    fn flush_buf(&mut self) -> io::Result<()> {
-        let mut written = 0;
-        let len = self.buf.len();
-        let mut ret = Ok(());
-        while written < len {
-            self.panicked = true;
-            let r = self.inner.as_mut().unwrap().write(&self.buf[written..]);
-            self.panicked = false;
-
-            match r {
-                Ok(0) => {
-                    ret = Err(Error::new(ErrorKind::WriteZero,
-                                         "failed to write the buffered data"));
-                    break;
-                }
-                Ok(n) => written += n,
-                Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
-                Err(e) => { ret = Err(e); break }
-
-            }
-        }
-        if written > 0 {
-            self.buf.drain(..written);
-        }
-        ret
-    }
-
-    pub fn get_mut(&mut self) -> &mut TcpStream { self.inner.as_mut().unwrap() }
-
-    fn write_and_time(&mut self, buf: &[u8]) -> io::Result<(usize, bool)> {
-        if self.buf.len() + buf.len() > self.buf.capacity() {
-            self.flush_buf()?;
-        }
-        if buf.len() >= self.buf.capacity() {
-            self.panicked = true;
-            let r = self.inner.as_mut().unwrap().write(buf);
-            self.panicked = false;
-            r.map(|result| (result, true))
-        } else {
-            Write::write(&mut self.buf, buf).map(|result| (result, false))
-        }
-    }
-    fn flush_and_count(&mut self) -> io::Result<usize> {
-        let len = self.buf.len();
-        self.flush_buf().and_then(|()| self.get_mut().flush());
-        Ok(len)
-    }
-}
-
-impl Write for MyBuf {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.buf.len() + buf.len() > self.buf.capacity() {
-            self.flush_buf()?;
-        }
-        if buf.len() >= self.buf.capacity() {
-            self.panicked = true;
-            let r = self.inner.as_mut().unwrap().write(buf);
-            self.panicked = false;
-            r
-        } else {
-            Write::write(&mut self.buf, buf)
-        }
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        self.flush_buf().and_then(|()| self.get_mut().flush())
-    }
 }

@@ -164,8 +164,8 @@ impl<A: Allocate> Drop for TcpAllocator<A> {
                 println!("{:?}", entry);
             }
             println!("------------\nN_messages summary\n---------------");
-            println!("{}", self.hist_processing.summary_string());
-            for entry in self.hist_processing.ccdf() {
+            println!("{}", self.hist_n_messages.summary_string());
+            for entry in self.hist_n_messages.ccdf() {
                 println!("{:?}", entry);
             }
         }

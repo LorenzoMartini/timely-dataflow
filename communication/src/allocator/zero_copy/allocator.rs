@@ -1,5 +1,5 @@
 //! Zero-copy allocator based on TCP.
-extern crate streaming_harness_hdrhist;
+extern crate hdrhist;
 extern crate amd64_timer;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -120,8 +120,9 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
             sends,
             recvs: self.recvs,
             to_local: HashMap::new(),
-            hist_lock: streaming_harness_hdrhist::HDRHist::new(),
-            hist_processing: streaming_harness_hdrhist::HDRHist::new(),
+            hist_lock: hdrhist::HDRHist::new(),
+            hist_n_messages: hdrhist::HDRHist::new(),
+            hist_processing: hdrhist::HDRHist::new(),
         }
     }
 }
@@ -144,8 +145,9 @@ pub struct TcpAllocator<A: Allocate> {
     recvs:      Vec<MergeQueue>,                                // recvs[x] <- from process x.
     to_local:   HashMap<usize, Rc<RefCell<VecDeque<Bytes>>>>,   // to worker-local typed pullers.
 
-    hist_lock: streaming_harness_hdrhist::HDRHist,
-    hist_processing: streaming_harness_hdrhist::HDRHist,
+    hist_lock: hdrhist::HDRHist,
+    hist_n_messages: hdrhist::HDRHist,
+    hist_processing: hdrhist::HDRHist,
 }
 
 impl<A: Allocate> Drop for TcpAllocator<A> {
@@ -157,6 +159,11 @@ impl<A: Allocate> Drop for TcpAllocator<A> {
                 println!("{:?}", entry);
             }
             println!("------------\nMessage pull to pull summary\n---------------");
+            println!("{}", self.hist_processing.summary_string());
+            for entry in self.hist_processing.ccdf() {
+                println!("{:?}", entry);
+            }
+            println!("------------\nN_messages summary\n---------------");
             println!("{}", self.hist_processing.summary_string());
             for entry in self.hist_processing.ccdf() {
                 println!("{:?}", entry);
@@ -279,6 +286,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         for _ in 0..tot_messages {
             self.hist_processing.add_value(tf -t0_pull);
         }
+        self.hist_n_messages.add_value(tot_messages as u64);
     }
 
     // Perform postparatory work, most likely sending un-full binary buffers.

@@ -157,22 +157,22 @@ impl<A: Allocate> Drop for TcpAllocator<A> {
         if self.index == 0 {
             println!("------------\nN_messages summary\n---------------");
             println!("{}", self.hist_n_messages.summary_string());
-            for entry in self.hist_n_messages.ccdf() {
+            for entry in self.hist_n_messages.ccdf_upper_bound() {
                 println!("{:?}", entry);
             }
             println!("------------\nN_messages nonzero\n---------------");
             println!("{}", self.hist_n_messages_nozero.summary_string());
-            for entry in self.hist_n_messages_nozero.ccdf() {
+            for entry in self.hist_n_messages_nozero.ccdf_upper_bound() {
                 println!("{:?}", entry);
             }
             println!("------------\nLock summary\n---------------");
             println!("{}", self.hist_lock.summary_string());
-            for entry in self.hist_lock.ccdf() {
+            for entry in self.hist_lock.ccdf_upper_bound() {
                 println!("{:?}", entry);
             }
             println!("------------\nMessage pull to pull summary\n---------------");
             println!("{}", self.hist_processing.summary_string());
-            for entry in self.hist_processing.ccdf() {
+            for entry in self.hist_processing.ccdf_upper_bound() {
                 println!("{:?}", entry);
             }
         }

@@ -246,6 +246,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         self.inner.receive();
 
         // TODO t0 for pulling out of queue
+        let size = self.staged.len();
         let t0_pull = ticks();
         for recv in self.recvs.iter_mut() {
             // TODO here acquire lock and take out of queue
@@ -253,7 +254,9 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
             recv.drain_into(&mut self.staged);
             // TODO here take out of queue done
             let t1 = ticks();
-            self.hist_lock.add_value(t1 - t0);
+            if self.staged.len() > size {
+                self.hist_lock.add_value(t1 - t0);
+            }
         }
 
         let mut events = self.inner.events().borrow_mut();

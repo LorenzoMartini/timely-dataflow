@@ -122,6 +122,7 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
             to_local: HashMap::new(),
             hist_lock: hdrhist::HDRHist::new(),
             hist_n_messages: hdrhist::HDRHist::new(),
+            hist_n_messages_nozero: hdrhist::HDRHist::new(),
             hist_processing: hdrhist::HDRHist::new(),
         }
     }
@@ -147,12 +148,23 @@ pub struct TcpAllocator<A: Allocate> {
 
     hist_lock: hdrhist::HDRHist,
     hist_n_messages: hdrhist::HDRHist,
+    hist_n_messages_nozero: hdrhist::HDRHist,
     hist_processing: hdrhist::HDRHist,
 }
 
 impl<A: Allocate> Drop for TcpAllocator<A> {
     fn drop(&mut self) {
         if self.index == 0 {
+            println!("------------\nN_messages summary\n---------------");
+            println!("{}", self.hist_n_messages.summary_string());
+            for entry in self.hist_n_messages.ccdf() {
+                println!("{:?}", entry);
+            }
+            println!("------------\nN_messages nonzero\n---------------");
+            println!("{}", self.hist_n_messages_nozero.summary_string());
+            for entry in self.hist_n_messages_nozero.ccdf() {
+                println!("{:?}", entry);
+            }
             println!("------------\nLock summary\n---------------");
             println!("{}", self.hist_lock.summary_string());
             for entry in self.hist_lock.ccdf() {
@@ -161,11 +173,6 @@ impl<A: Allocate> Drop for TcpAllocator<A> {
             println!("------------\nMessage pull to pull summary\n---------------");
             println!("{}", self.hist_processing.summary_string());
             for entry in self.hist_processing.ccdf() {
-                println!("{:?}", entry);
-            }
-            println!("------------\nN_messages summary\n---------------");
-            println!("{}", self.hist_n_messages.summary_string());
-            for entry in self.hist_n_messages.ccdf() {
                 println!("{:?}", entry);
             }
         }
@@ -287,6 +294,9 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
             self.hist_processing.add_value(tf -t0_pull);
         }
         self.hist_n_messages.add_value(tot_messages as u64);
+        if tot_messages > 0 {
+            self.hist_n_messages_nozero.add_value(tot_messages as u64);
+        }
     }
 
     // Perform postparatory work, most likely sending un-full binary buffers.

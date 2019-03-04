@@ -14,7 +14,7 @@ use allocator::{Event, Process};
 use allocator::process::ProcessBuilder;
 use allocator::canary::Canary;
 
-use super::bytes_exchange::{BytesPull, SendEndpoint, MergeQueue, Signal};
+use super::bytes_exchange::{BytesPull, SendEndpoint, merge_queue, MergeQueueProducer, MergeQueueConsumer, Signal};
 use super::push_pull::{Pusher, PullerInner};
 
 /// Builds an instance of a TcpAllocator.
@@ -27,8 +27,8 @@ pub struct TcpBuilder<A: AllocateBuilder> {
     inner:      A,
     index:      usize,              // number out of peers
     peers:      usize,              // number of peer allocators.
-    sends:      Vec<MergeQueue>,    // for pushing bytes at remote processes.
-    recvs:      Vec<MergeQueue>,    // for pulling bytes from remote processes.
+    sends:      Vec<MergeQueueProducer>,    // for pushing bytes at remote processes.
+    recvs:      Vec<MergeQueueConsumer>,    // for pulling bytes from remote processes.
     signal:     Signal,
 }
 
@@ -49,8 +49,8 @@ pub fn new_vector(
     threads: usize,
     processes: usize)
 -> (Vec<TcpBuilder<ProcessBuilder>>,
-    Vec<(Vec<MergeQueue>, Signal)>,
-    Vec<Vec<MergeQueue>>) {
+    Vec<(Vec<MergeQueueConsumer>, Signal)>,
+    Vec<Vec<MergeQueueProducer>>) {
 
     // The results are a vector of builders, as well as the necessary shared state to build each
     // of the send and receive communication threads, respectively.
@@ -61,11 +61,22 @@ pub fn new_vector(
     // One signal per destination egress communication thread
     let network_signals: Vec<Signal> = (0 .. processes-1).map(|_| Signal::new()).collect();
 
-    let worker_to_network: Vec<Vec<_>> = (0 .. threads).map(|_| (0 .. processes-1).map(|p| MergeQueue::new(network_signals[p].clone())).collect()).collect();
-    let network_to_worker: Vec<Vec<_>> = (0 .. processes-1).map(|_| (0 .. threads).map(|t| MergeQueue::new(worker_signals[t].clone())).collect()).collect();
+    // This block can be removed once non-lexical lifetimes are enabled
+    let (worker_to_network, network_to_worker, worker_from_network, network_from_worker) = {
+        let worker_network = (0 .. threads).map(|_| (0 .. processes-1).map(|p| merge_queue(network_signals[p].clone())));
+        let network_worker = (0 .. processes-1).map(|_| (0 .. threads).map(|t| merge_queue(worker_signals[t].clone())));
 
-    let worker_from_network: Vec<Vec<_>> = (0 .. threads).map(|t| (0 .. processes-1).map(|p| network_to_worker[p][t].clone()).collect()).collect();
-    let network_from_worker: Vec<Vec<_>> = (0 .. processes-1).map(|p| (0 .. threads).map(|t| worker_to_network[t][p].clone()).collect()).collect();
+        let (worker_to_network, worker_from_network_t): (Vec<Vec<_>>, Vec<Vec<_>>) = worker_network.map(|x| x.unzip()).unzip();
+        let (network_to_worker, network_from_worker_t): (Vec<Vec<_>>, Vec<Vec<_>>) = network_worker.map(|x| x.unzip()).unzip();
+
+        let mut worker_from_network_t: Vec<Vec<Option<MergeQueueConsumer>>> = worker_from_network_t.into_iter().map(|x| x.into_iter().map(Some).collect()).collect();
+        let mut network_from_worker_t: Vec<Vec<Option<MergeQueueConsumer>>> = network_from_worker_t.into_iter().map(|x| x.into_iter().map(Some).collect()).collect();
+
+        let worker_from_network: Vec<Vec<_>> = (0 .. threads).map(|t| (0 .. processes-1).map(|p| worker_from_network_t[p][t].take().unwrap()).collect()).collect();
+        let network_from_worker: Vec<Vec<_>> = (0 .. processes-1).map(|p| (0 .. threads).map(|t| network_from_worker_t[t][p].take().unwrap()).collect()).collect();
+
+        (worker_to_network, network_to_worker, worker_from_network, network_from_worker)
+    };
 
     let builders =
     Process::new_vector(threads) // Vec<Process> (Process is Allocate)
@@ -134,8 +145,8 @@ pub struct TcpAllocator<A: Allocate> {
     canaries:   Rc<RefCell<Vec<usize>>>,
 
     // sending, receiving, and responding to binary buffers.
-    sends:      Vec<Rc<RefCell<SendEndpoint<MergeQueue>>>>,     // sends[x] -> goes to process x.
-    recvs:      Vec<MergeQueue>,                                // recvs[x] <- from process x.
+    sends:      Vec<Rc<RefCell<SendEndpoint<MergeQueueProducer>>>>,     // sends[x] -> goes to process x.
+    recvs:      Vec<MergeQueueConsumer>,                                // recvs[x] <- from process x.
     to_local:   HashMap<usize, Rc<RefCell<VecDeque<Bytes>>>>,   // to worker-local typed pullers.
 }
 

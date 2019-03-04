@@ -58,26 +58,39 @@ impl Signal {
 }
 
 use std::sync::atomic::{AtomicBool, Ordering};
-/// An unbounded queue of bytes intended for point-to-point communication
-/// between threads. Cloning returns another handle to the same queue.
-///
-/// TODO: explain "extend"
-#[derive(Clone)]
-pub struct MergeQueue {
+
+/// The receiver end of a merge queue.
+pub struct MergeQueueProducer {
     queue: Arc<Mutex<VecDeque<Bytes>>>, // queue of bytes.
     dirty: Signal,                      // indicates whether there may be data present.
     panic: Arc<AtomicBool>,
 }
 
-impl MergeQueue {
-    /// Allocates a new queue with an associated signal.
-    pub fn new(signal: Signal) -> Self {
-        MergeQueue {
-            queue: Arc::new(Mutex::new(VecDeque::new())),
-            dirty: signal,
-            panic: Arc::new(AtomicBool::new(false)),
-        }
-    }
+/// The sender end of a merge queue.
+pub struct MergeQueueConsumer {
+    queue: Arc<Mutex<VecDeque<Bytes>>>, // queue of bytes.
+    panic: Arc<AtomicBool>,
+}
+
+/// Allocates a new unbounded queue of bytes intended for point-to-point communication
+/// between threads.
+///
+/// TODO: explain "extend"
+pub fn merge_queue(signal: Signal) -> (MergeQueueProducer, MergeQueueConsumer) {
+    let queue = Arc::new(Mutex::new(VecDeque::new()));
+    let panic = Arc::new(AtomicBool::new(false));
+    (MergeQueueProducer {
+        queue: queue.clone(),
+        dirty: signal,
+        panic: panic.clone(),
+    },
+     MergeQueueConsumer {
+         queue,
+         panic,
+     })
+}
+
+impl MergeQueueConsumer {
     /// Indicates that all input handles to the queue have dropped.
     pub fn is_complete(&self) -> bool {
         if self.panic.load(Ordering::SeqCst) { panic!("MergeQueue poisoned."); }
@@ -85,7 +98,7 @@ impl MergeQueue {
     }
 }
 
-impl BytesPush for MergeQueue {
+impl BytesPush for MergeQueueProducer {
     fn extend<I: IntoIterator<Item=Bytes>>(&mut self, iterator: I) {
 
         if self.panic.load(Ordering::SeqCst) { panic!("MergeQueue poisoned."); }
@@ -127,7 +140,7 @@ impl BytesPush for MergeQueue {
     }
 }
 
-impl BytesPull for MergeQueue {
+impl BytesPull for MergeQueueConsumer {
     fn drain_into(&mut self, vec: &mut Vec<Bytes>) {
         if self.panic.load(Ordering::SeqCst) { panic!("MergeQueue poisoned."); }
 
@@ -144,7 +157,7 @@ impl BytesPull for MergeQueue {
 
 // We want to ping in the drop because a channel closing can unblock a thread waiting on
 // the next bit of data to show up.
-impl Drop for MergeQueue {
+impl Drop for MergeQueueProducer {
     fn drop(&mut self) {
         // Propagate panic information, to distinguish between clean and unclean shutdown.
         if ::std::thread::panicking() {

@@ -12,7 +12,7 @@ use {Allocate, Message, Data, Push, Pull};
 use allocator::{AllocateBuilder, Event};
 use allocator::canary::Canary;
 
-use super::bytes_exchange::{BytesPull, SendEndpoint, MergeQueue, Signal};
+use super::bytes_exchange::{BytesPull, SendEndpoint, merge_queue, MergeQueueProducer, MergeQueueConsumer, Signal};
 
 use super::push_pull::{Pusher, Puller};
 
@@ -25,8 +25,8 @@ use super::push_pull::{Pusher, Puller};
 pub struct ProcessBuilder {
     index:      usize,              // number out of peers
     peers:      usize,              // number of peer allocators.
-    sends:      Vec<MergeQueue>,    // for pushing bytes at remote processes.
-    recvs:      Vec<MergeQueue>,    // for pulling bytes from remote processes.
+    sends:      Vec<MergeQueueProducer>,    // for pushing bytes at remote processes.
+    recvs:      Vec<MergeQueueConsumer>,    // for pulling bytes from remote processes.
     signal:     Signal,
 }
 
@@ -45,8 +45,7 @@ impl ProcessBuilder {
 
         for source in 0 .. count {
             for target in 0 .. count {
-                let send = MergeQueue::new(signals[target].clone());
-                let recv = send.clone();
+                let (send, recv) = merge_queue(signals[target].clone());
                 sends[source].push(send);
                 recvs[target].push(recv);
             }
@@ -113,8 +112,8 @@ pub struct ProcessAllocator {
     _signal:     Signal,
     // sending, receiving, and responding to binary buffers.
     staged:     Vec<Bytes>,
-    sends:      Vec<Rc<RefCell<SendEndpoint<MergeQueue>>>>, // sends[x] -> goes to thread x.
-    recvs:      Vec<MergeQueue>,                            // recvs[x] <- from thread x.
+    sends:      Vec<Rc<RefCell<SendEndpoint<MergeQueueProducer>>>>, // sends[x] -> goes to thread x.
+    recvs:      Vec<MergeQueueConsumer>,                            // recvs[x] <- from thread x.
     to_local:   HashMap<usize, Rc<RefCell<VecDeque<Bytes>>>>,          // to worker-local typed pullers.
 }
 

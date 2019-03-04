@@ -4,7 +4,7 @@ use std::net::TcpStream;
 use networking::MessageHeader;
 
 use super::bytes_slab::BytesSlab;
-use super::bytes_exchange::{MergeQueue, Signal};
+use super::bytes_exchange::{Signal, MergeQueueProducer, MergeQueueConsumer};
 
 use logging_core::Logger;
 
@@ -18,7 +18,7 @@ use ::logging::{CommunicationEvent, CommunicationSetup, MessageEvent, StateEvent
 /// take down the computation and cause the failures to cascade.
 pub fn recv_loop(
     mut reader: TcpStream,
-    mut targets: Vec<MergeQueue>,
+    mut targets: Vec<MergeQueueProducer>,
     worker_offset: usize,
     process: usize,
     remote: usize,
@@ -107,7 +107,7 @@ pub fn recv_loop(
 pub fn send_loop(
     // TODO: Maybe we don't need BufWriter with consolidation in writes.
     writer: TcpStream,
-    mut sources: Vec<MergeQueue>,
+    mut sources: Vec<MergeQueueConsumer>,
     signal: Signal,
     process: usize,
     remote: usize,

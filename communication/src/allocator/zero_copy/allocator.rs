@@ -202,9 +202,6 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
     // Perform preparatory work, most likely reading binary buffers from self.recv.
     #[inline(never)]
     fn receive(&mut self) {
-        if self.index == 0 {
-            println!("W{}", self.index);
-        }
 
         // Check for channels whose `Puller` has been dropped.
         let mut canaries = self.canaries.borrow_mut();

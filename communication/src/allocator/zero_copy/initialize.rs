@@ -57,6 +57,7 @@ pub fn initialize_networking(
     let mut send_guards = Vec::new();
     let mut recv_guards = Vec::new();
 
+
     // for each process, if a stream exists (i.e. not local) ...
     for index in 0..results.len() {
 

@@ -4,6 +4,8 @@ use std::thread::Thread;
 use std::sync::{Arc, Mutex, RwLock};
 use std::collections::VecDeque;
 
+use npnc::bounded::spsc;
+
 use bytes::arc::Bytes;
 use super::bytes_slab::BytesSlab;
 
@@ -61,15 +63,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The receiver end of a merge queue.
 pub struct MergeQueueProducer {
-    queue: Arc<Mutex<VecDeque<Bytes>>>, // queue of bytes.
+    producer: Option<spsc::Producer<Bytes>>,    // queue of bytes.
     dirty: Signal,                      // indicates whether there may be data present.
     panic: Arc<AtomicBool>,
+    to_send: VecDeque<Bytes>,
 }
 
 /// The sender end of a merge queue.
 pub struct MergeQueueConsumer {
-    queue: Arc<Mutex<VecDeque<Bytes>>>, // queue of bytes.
+    consumer: spsc::Consumer<Bytes>, // queue of bytes.
     panic: Arc<AtomicBool>,
+    complete: bool,
 }
 
 /// Allocates a new unbounded queue of bytes intended for point-to-point communication
@@ -77,16 +81,18 @@ pub struct MergeQueueConsumer {
 ///
 /// TODO: explain "extend"
 pub fn merge_queue(signal: Signal) -> (MergeQueueProducer, MergeQueueConsumer) {
-    let queue = Arc::new(Mutex::new(VecDeque::new()));
+    let (producer, consumer) = spsc::channel(512);
     let panic = Arc::new(AtomicBool::new(false));
     (MergeQueueProducer {
-        queue: queue.clone(),
+        producer: Some(producer),
         dirty: signal,
         panic: panic.clone(),
+        to_send: VecDeque::with_capacity(32),
     },
      MergeQueueConsumer {
-         queue,
+         consumer,
          panic,
+         complete: false,
      })
 }
 
@@ -94,7 +100,7 @@ impl MergeQueueConsumer {
     /// Indicates that all input handles to the queue have dropped.
     pub fn is_complete(&self) -> bool {
         if self.panic.load(Ordering::SeqCst) { panic!("MergeQueue poisoned."); }
-        Arc::strong_count(&self.queue) == 1 && self.queue.lock().expect("Failed to acquire lock").is_empty()
+        self.complete
     }
 }
 
@@ -103,38 +109,39 @@ impl BytesPush for MergeQueueProducer {
 
         if self.panic.load(Ordering::SeqCst) { panic!("MergeQueue poisoned."); }
 
-        // try to acquire lock without going to sleep (Rust's lock() might yield)
-        let mut lock_ok = self.queue.try_lock();
-        while let Result::Err(::std::sync::TryLockError::WouldBlock) = lock_ok {
-            lock_ok = self.queue.try_lock();
-        }
-        let mut queue = lock_ok.expect("MergeQueue mutex poisoned.");
-
         let mut iterator = iterator.into_iter();
-        let mut should_ping = false;
+
         if let Some(bytes) = iterator.next() {
-            let mut tail = if let Some(mut tail) = queue.pop_back() {
+            let mut tail = if let Some(mut tail) = self.to_send.pop_back() {
                 if let Err(bytes) = tail.try_merge(bytes) {
-                    queue.push_back(::std::mem::replace(&mut tail, bytes));
+                    self.to_send.push_back(::std::mem::replace(&mut tail, bytes));
                 }
                 tail
             }
             else {
-                should_ping = true;
                 bytes
             };
 
             for bytes in iterator {
                 if let Err(bytes) = tail.try_merge(bytes) {
-                    queue.push_back(::std::mem::replace(&mut tail, bytes));
+                    self.to_send.push_back(::std::mem::replace(&mut tail, bytes));
                 }
             }
-            queue.push_back(tail);
+            self.to_send.push_back(tail);
         }
 
         // Wakeup corresponding thread *after* releasing the lock
-        ::std::mem::drop(queue);
-        if should_ping {
+        if self.to_send.len() > 0 {
+            for bytes in self.to_send.drain(..) {
+                let mut sending = Some(bytes);
+                while sending.is_some() {
+                    match self.producer.as_mut().unwrap().produce(sending.take().unwrap()) {
+                        Ok(()) => (),
+                        Err(::npnc::ProduceError::Disconnected(_)) => panic!("MergeQueueConsumer disconnected"),
+                        Err(::npnc::ProduceError::Full(item)) => { sending = Some(item) }, // try again
+                    }
+                }
+            }
             self.dirty.ping();  // only signal from empty to non-empty.
         }
     }
@@ -144,14 +151,11 @@ impl BytesPull for MergeQueueConsumer {
     fn drain_into(&mut self, vec: &mut Vec<Bytes>) {
         if self.panic.load(Ordering::SeqCst) { panic!("MergeQueue poisoned."); }
 
-        // try to acquire lock without going to sleep (Rust's lock() might yield)
-        let mut lock_ok = self.queue.try_lock();
-        while let Result::Err(::std::sync::TryLockError::WouldBlock) = lock_ok {
-            lock_ok = self.queue.try_lock();
-        }
-        let mut queue = lock_ok.expect("MergeQueue mutex poisoned.");
-
-        vec.extend(queue.drain(..));
+        while match self.consumer.consume() {
+            Ok(item) => { vec.push(item); true },
+            Err(::npnc::ConsumeError::Disconnected) => { self.complete = true; false },
+            Err(::npnc::ConsumeError::Empty) => { false },
+        } {}
     }
 }
 
@@ -168,7 +172,7 @@ impl Drop for MergeQueueProducer {
             if self.panic.load(Ordering::SeqCst) { panic!("MergeQueue poisoned."); }
         }
         // Drop the queue before pinging.
-        self.queue = Arc::new(Mutex::new(VecDeque::new()));
+        ::std::mem::drop(self.producer.take().unwrap());
         self.dirty.ping();
     }
 }

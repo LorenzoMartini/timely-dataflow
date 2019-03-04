@@ -63,12 +63,18 @@ pub fn new_vector(
 
     // This block can be removed once non-lexical lifetimes are enabled
     let (worker_to_network, network_to_worker, worker_from_network, network_from_worker) = {
-
         let worker_network = (0 .. threads).map(|_| (0 .. processes-1).map(|p| merge_queue(network_signals[p].clone())));
         let network_worker = (0 .. processes-1).map(|_| (0 .. threads).map(|t| merge_queue(worker_signals[t].clone())));
 
-        let (worker_to_network, worker_from_network): (Vec<Vec<_>>, Vec<Vec<_>>) = worker_network.map(|x| x.unzip()).unzip();
-        let (network_to_worker, network_from_worker): (Vec<Vec<_>>, Vec<Vec<_>>) = network_worker.map(|x| x.unzip()).unzip();
+        let (worker_to_network, network_from_worker_t): (Vec<Vec<_>>, Vec<Vec<_>>) = worker_network.map(|x| x.unzip()).unzip();
+        let (network_to_worker, worker_from_network_t): (Vec<Vec<_>>, Vec<Vec<_>>) = network_worker.map(|x| x.unzip()).unzip();
+
+        let mut worker_from_network_t: Vec<Vec<Option<MergeQueueConsumer>>> = worker_from_network_t.into_iter().map(|x| x.into_iter().map(Some).collect()).collect();
+        let mut network_from_worker_t: Vec<Vec<Option<MergeQueueConsumer>>> = network_from_worker_t.into_iter().map(|x| x.into_iter().map(Some).collect()).collect();
+
+        let worker_from_network: Vec<Vec<_>> = (0 .. threads).map(|t| (0 .. processes-1).map(|p| worker_from_network_t[p][t].take().unwrap()).collect()).collect();
+        let network_from_worker: Vec<Vec<_>> = (0 .. processes-1).map(|p| (0 .. threads).map(|t| network_from_worker_t[t][p].take().unwrap()).collect()).collect();
+
         (worker_to_network, network_to_worker, worker_from_network, network_from_worker)
     };
 

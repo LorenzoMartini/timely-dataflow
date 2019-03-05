@@ -1,7 +1,7 @@
 //! Types and traits for sharing `Bytes`.
 
 use std::thread::Thread;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::collections::VecDeque;
 
 use npnc::bounded::spsc;

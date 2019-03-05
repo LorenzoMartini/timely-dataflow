@@ -13,7 +13,6 @@ use super::bytes_exchange::{Signal, MergeQueueProducer, MergeQueueConsumer};
 use logging_core::Logger;
 
 use ::logging::{CommunicationEvent, CommunicationSetup, MessageEvent, StateEvent};
-use std::collections::VecDeque;
 
 /// Repeatedly reads from a TcpStream and carves out messages.
 ///
@@ -126,19 +125,15 @@ pub fn send_loop(
     let mut stash = Vec::new();
 
     let mut hist = hdrhist::HDRHist::new();
-    let mut times: VecDeque<u64> = VecDeque::new();
     while !sources.is_empty() {
 
-        let mut len = stash.len();
         // TODO: Round-robin better, to release resources fairly when overloaded.
         for source in sources.iter_mut() {
             use allocator::zero_copy::bytes_exchange::BytesPull;
+            let t0 = ticks();
             source.drain_into(&mut stash);
-            if stash.len() > len {
-                // Pushed something => insert t0 in queue
-                times.push_back(ticks());
-                len = stash.len();
-            }
+            let t1 = ticks();
+            hist.add_value(t1 - t0);
         }
 
         if stash.is_empty() {
@@ -148,12 +143,7 @@ pub fn send_loop(
             // still be a signal incoming.
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
-            let t1 = ticks();
             writer.flush().expect("Failed to flush writer.");
-
-            while !times.is_empty() {
-                hist.add_value(t1 - times.pop_front().unwrap());
-            }
 
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
@@ -194,7 +184,7 @@ pub fn send_loop(
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
-    println!("------------\nWrite delay summary\n---------------");
+    println!("------------\nsingle drain_into() latency\n---------------");
     println!("{}", hist.summary_string());
     for entry in hist.ccdf() {
         println!("{:?}", entry);

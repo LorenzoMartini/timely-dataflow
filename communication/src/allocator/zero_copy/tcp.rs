@@ -128,13 +128,14 @@ pub fn send_loop(
     while !sources.is_empty() {
 
         // TODO: Round-robin better, to release resources fairly when overloaded.
+
+        let t0 = ticks();
         for source in sources.iter_mut() {
             use allocator::zero_copy::bytes_exchange::BytesPull;
-            let t0 = ticks();
             source.drain_into(&mut stash);
-            let t1 = ticks();
-            hist.add_value(t1 - t0);
         }
+        let t1 = ticks();
+        hist.add_value(t1 - t0);
 
         if stash.is_empty() {
             // No evidence of records to read, but sources not yet empty (at start of loop).
@@ -184,7 +185,7 @@ pub fn send_loop(
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
-    println!("------------\nsingle drain_into() latency\n---------------");
+    println!("------------\nAll drain_into() latency\n---------------");
     println!("{}", hist.summary_string());
     for entry in hist.ccdf() {
         println!("{:?}", entry);

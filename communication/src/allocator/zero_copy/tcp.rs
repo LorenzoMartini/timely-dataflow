@@ -1,4 +1,6 @@
 //!\
+extern crate hdrhist;
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use networking::MessageHeader;
@@ -120,6 +122,9 @@ pub fn send_loop(
     let mut writer = ::std::io::BufWriter::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
 
+    let mut hist = hdrhist::HDRHist::new();
+    let mut hist_bytes = hdrhist::HDRHist::new();
+
     while !sources.is_empty() {
 
         // TODO: Round-robin better, to release resources fairly when overloaded.
@@ -144,6 +149,8 @@ pub fn send_loop(
         }
             else {
                 // TODO: Could do scatter/gather write here.
+                let mut tot_n_messages = 0;
+                let mut tot_n_bytes = 0;
                 for mut bytes in stash.drain(..) {
 
                     // Record message sends.
@@ -154,8 +161,12 @@ pub fn send_loop(
                             offset += header.required_bytes();
                         }
                     });
+                    tot_n_messages += 1;
+                    tot_n_bytes += bytes.len();
                     writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
                 }
+                hist.add_value(tot_n_messages as u64);
+                hist_bytes.add_value(tot_n_bytes as u64);
             }
     }
 
@@ -176,4 +187,14 @@ pub fn send_loop(
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
+    println!("------------\nTot n_messages per round\n---------------");
+    println!("{}", hist.summary_string());
+    for entry in hist.ccdf_upper_bound() {
+        println!("{:?}", entry);
+    }
+    println!("------------\nTot bytes per round\n---------------");
+    println!("{}", hist_bytes.summary_string());
+    for entry in hist_bytes.ccdf_upper_bound() {
+        println!("{:?}", entry);
+    }
 }

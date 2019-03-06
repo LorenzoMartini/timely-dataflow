@@ -175,6 +175,6 @@ pub fn send_loop(
     writer.flush().expect("Failed to flush writer.");
     writer.get_mut().shutdown(::std::net::Shutdown::Write).expect("Write shutdown failed");
     logger.as_mut().map(|logger| logger.log(MessageEvent { is_send: true, header }));
-    
+
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
 }

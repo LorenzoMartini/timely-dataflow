@@ -5,7 +5,6 @@ extern crate amd64_timer;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use networking::MessageHeader;
-use self::amd64_timer::ticks;
 
 use super::bytes_slab::BytesSlab;
 use super::bytes_exchange::{Signal, MergeQueueProducer, MergeQueueConsumer};

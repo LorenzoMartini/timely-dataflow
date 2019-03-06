@@ -126,7 +126,12 @@ pub fn send_loop(
     let mut stash = Vec::new();
 
     let mut hist = hdrhist::HDRHist::new();
+    let mut hist_write = hdrhist::HDRHist::new();
+    let mut hist_nbytes = hdrhist::HDRHist::new();
+
     let mut t0 = ticks();
+    let mut n_bytes = 0;
+
     while !sources.is_empty() {
 
         // TODO: Round-robin better, to release resources fairly when overloaded.
@@ -142,9 +147,15 @@ pub fn send_loop(
             // still be a signal incoming.
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
-            hist.add_value(ticks() - t0);
+            let t1 = ticks();
             writer.flush().expect("Failed to flush writer.");
+
+            hist_nbytes.add_value(n_bytes);
+            n_bytes = 0;
+            hist.add_value(t1 - t0);
             t0 = ticks();
+            hist_write.add_value(t0 - t1);
+
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
                 signal.wait();
@@ -162,6 +173,7 @@ pub fn send_loop(
                             offset += header.required_bytes();
                         }
                     });
+                    n_bytes += bytes.len() as u64;
                     writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
                 }
             }
@@ -184,9 +196,19 @@ pub fn send_loop(
 
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
 
-    println!("------------\ntime interval between flushes (cycles)\n---------------");
+    println!("------------\nTime interval between flushes (cycles)\n---------------");
     println!("{}", hist.summary_string());
     for entry in hist.ccdf_upper_bound() {
+        println!("{:?}", entry);
+    }
+    println!("------------\nTime duration of flush (cycles)\n---------------");
+    println!("{}", hist_write.summary_string());
+    for entry in hist_write.ccdf_upper_bound() {
+        println!("{:?}", entry);
+    }
+    println!("------------\nNumber of bytes written at flush\n---------------");
+    println!("{}", hist_nbytes.summary_string());
+    for entry in hist_nbytes.ccdf_upper_bound() {
         println!("{:?}", entry);
     }
 }

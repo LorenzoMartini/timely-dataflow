@@ -1,9 +1,12 @@
 //!\
 extern crate hdrhist;
+extern crate amd64_timer;
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use networking::MessageHeader;
+
+use self::amd64_timer::ticks;
 
 use super::bytes_slab::BytesSlab;
 use super::bytes_exchange::{MergeQueue, Signal};
@@ -122,6 +125,8 @@ pub fn send_loop(
     let mut writer = ::std::io::BufWriter::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
 
+    let mut hist = hdrhist::HDRHist::new();
+    let mut t0 = ticks();
     while !sources.is_empty() {
 
         // TODO: Round-robin better, to release resources fairly when overloaded.
@@ -137,8 +142,9 @@ pub fn send_loop(
             // still be a signal incoming.
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
+            hist.add_value(ticks() - t0);
             writer.flush().expect("Failed to flush writer.");
-
+            t0 = ticks();
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
                 signal.wait();
@@ -177,4 +183,10 @@ pub fn send_loop(
     logger.as_mut().map(|logger| logger.log(MessageEvent { is_send: true, header }));
 
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
+
+    println!("------------\ntime interval between flushes (cycles)\n---------------");
+    println!("{}", hist.summary_string());
+    for entry in hist.ccdf_upper_bound() {
+        println!("{:?}", entry);
+    }
 }

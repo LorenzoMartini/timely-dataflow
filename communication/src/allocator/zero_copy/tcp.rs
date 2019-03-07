@@ -187,6 +187,7 @@ pub fn send_loop(
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
 
+    println!("HISTSUM\n{}", hist.summary_string());
     for val in hist.ccdf_upper_bound() {
         println!("{:?}", val);
     }

@@ -126,6 +126,7 @@ pub fn send_loop(
 
     let mut hist = hdrhist::HDRHist::new();
 
+    let mut tot = 0;
     while !sources.is_empty() {
 
         // TODO: Round-robin better, to release resources fairly when overloaded.
@@ -133,6 +134,7 @@ pub fn send_loop(
         for source in sources.iter_mut() {
             use allocator::zero_copy::bytes_exchange::BytesPull;
             source.drain_into(&mut stash);
+            tot += 1;
         }
 
         if stash.is_empty() {
@@ -143,14 +145,14 @@ pub fn send_loop(
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
             writer.flush().expect("Failed to flush writer.");
-
+            hist.add_value(tot);
+            tot = 0;
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
                 signal.wait();
             }
         }
             else {
-                let t0 = ticks();
                 // TODO: Could do scatter/gather write here.
                 for mut bytes in stash.drain(..) {
 
@@ -164,8 +166,6 @@ pub fn send_loop(
                     });
                     writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
                 }
-                let t1 = ticks();
-                hist.add_value(t1 -t0);
             }
     }
 
@@ -187,5 +187,7 @@ pub fn send_loop(
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
 
-    println!("HISTSUM\n{}", hist.summary_string());
+    for val in hist.ccdf_upper_bound() {
+        println!("{:?}", val);
+    }
 }

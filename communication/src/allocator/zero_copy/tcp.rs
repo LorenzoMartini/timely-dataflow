@@ -9,6 +9,7 @@ use networking::MessageHeader;
 use super::bytes_slab::BytesSlab;
 use super::bytes_exchange::{Signal, MergeQueueProducer, MergeQueueConsumer};
 
+use self::amd64_timer::ticks;
 use logging_core::Logger;
 
 use ::logging::{CommunicationEvent, CommunicationSetup, MessageEvent, StateEvent};
@@ -123,6 +124,8 @@ pub fn send_loop(
     let mut writer = ::std::io::BufWriter::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
 
+    let mut hist = hdrhist::HDRHist::new();
+
     while !sources.is_empty() {
 
         // TODO: Round-robin better, to release resources fairly when overloaded.
@@ -147,6 +150,7 @@ pub fn send_loop(
             }
         }
             else {
+                let t0 = ticks();
                 // TODO: Could do scatter/gather write here.
                 for mut bytes in stash.drain(..) {
 
@@ -160,6 +164,8 @@ pub fn send_loop(
                     });
                     writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
                 }
+                let t1 = ticks();
+                hist.add_value(t1 -t0);
             }
     }
 
@@ -180,4 +186,6 @@ pub fn send_loop(
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
+
+    println!("HISTSUM\n{}", hist.summary_string());
 }

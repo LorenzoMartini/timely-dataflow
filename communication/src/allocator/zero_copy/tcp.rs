@@ -131,10 +131,10 @@ pub fn send_loop(
 
         // TODO: Round-robin better, to release resources fairly when overloaded.
 
+        tot += 1;
         for source in sources.iter_mut() {
             use allocator::zero_copy::bytes_exchange::BytesPull;
             source.drain_into(&mut stash);
-            tot += 1;
         }
 
         if stash.is_empty() {

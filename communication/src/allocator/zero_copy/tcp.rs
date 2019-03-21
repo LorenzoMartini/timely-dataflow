@@ -148,11 +148,15 @@ pub fn send_loop(
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
             let t1 = ticks();
-            hist.add_value(t1 - t0);
+            if n_bytes != 0 {
+                hist.add_value(t1 - t0);
+            }
             writer.flush().expect("Failed to flush writer.");
             t0 = ticks();
-            hist_write.add_value(t0 - t1);
-            hist_nbytes.add_value(n_bytes);
+            if n_bytes != 0 {
+                hist_write.add_value(t0 - t1);
+                hist_nbytes.add_value(n_bytes);
+            }
             n_bytes = 0;
 
             sources.retain(|source| !source.is_complete());

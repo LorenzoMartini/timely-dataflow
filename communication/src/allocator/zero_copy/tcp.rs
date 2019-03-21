@@ -129,8 +129,6 @@ pub fn send_loop(
     let mut hist_write = hdrhist::HDRHist::new();
     let mut hist_nbytes = hdrhist::HDRHist::new();
 
-    let mut hist_writeall = hdrhist::HDRHist::new();
-
     let mut t0 = ticks();
     let mut n_bytes = 0;
 
@@ -163,7 +161,6 @@ pub fn send_loop(
             }
         }
             else {
-                let writeall_t0 = ticks();
                 // TODO: Could do scatter/gather write here.
                 for mut bytes in stash.drain(..) {
 
@@ -178,8 +175,6 @@ pub fn send_loop(
                     n_bytes += bytes.len() as u64;
                     writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
                 }
-                let writeall_t1 = ticks();
-                hist_writeall.add_value(writeall_t1 - writeall_t0);
             }
     }
 
@@ -213,11 +208,6 @@ pub fn send_loop(
     println!("------------\nNumber of bytes written at flush\n---------------");
     println!("{}", hist_nbytes.summary_string());
     for entry in hist_nbytes.ccdf_upper_bound() {
-        println!("{:?}", entry);
-    }
-    println!("------------\nWriteall duration\n---------------");
-    println!("{}", hist_writeall.summary_string());
-    for entry in hist_writeall.ccdf_upper_bound() {
         println!("{:?}", entry);
     }
 }

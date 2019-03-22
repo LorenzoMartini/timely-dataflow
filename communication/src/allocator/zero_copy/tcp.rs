@@ -132,8 +132,7 @@ pub fn recv_loop(
                                 panic!("Clean shutdown followed by data.");
                             }
                             0
-                        }
-                        ,
+                        },
                         Err(x) => {
                             match x.kind() {
                                 std::io::ErrorKind::WouldBlock => {

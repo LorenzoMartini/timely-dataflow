@@ -131,6 +131,7 @@ pub fn send_loop(
 
     let mut t0 = ticks();
     let mut n_bytes = 0;
+    let mut zero_count = 0;
 
     while !sources.is_empty() {
 
@@ -150,6 +151,8 @@ pub fn send_loop(
             let t1 = ticks();
             if n_bytes != 0 {
                 hist.add_value(t1 - t0);
+            } else {
+                zero_count += 1;
             }
             writer.flush().expect("Failed to flush writer.");
             t0 = ticks();
@@ -214,4 +217,5 @@ pub fn send_loop(
     for entry in hist_nbytes.ccdf_upper_bound() {
         println!("{:?}", entry);
     }
+    println!("ZEROCOUNT: {}", zero_count);
 }

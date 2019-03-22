@@ -161,7 +161,6 @@ pub fn send_loop(
                 hist_nbytes.add_value(n_bytes);
             }
             n_bytes = 0;
-
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
                 signal.wait();

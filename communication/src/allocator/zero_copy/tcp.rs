@@ -14,6 +14,9 @@ use super::bytes_exchange::{MergeQueue, Signal};
 use logging_core::Logger;
 
 use ::logging::{CommunicationEvent, CommunicationSetup, MessageEvent, StateEvent};
+use std::io::Error;
+use std::io;
+use std::io::ErrorKind;
 
 /// Repeatedly reads from a TcpStream and carves out messages.
 ///
@@ -29,6 +32,7 @@ pub fn recv_loop(
     remote: usize,
     mut logger: Option<Logger<CommunicationEvent, CommunicationSetup>>)
 {
+    reader.set_nonblocking(true).expect("NONBLOCKING SETUP FAILED");
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: true }));
     let mut buffer = BytesSlab::new(20);
@@ -48,23 +52,55 @@ pub fn recv_loop(
     // can be recovered once all readers have read what they need to.
     let mut active = true;
 
+    let mut hist_interval = hdrhist::HDRHist::new();
+    let mut hist_read = hdrhist::HDRHist::new();
+    let mut hist_sleep = hdrhist::HDRHist::new();
+    let mut hist_nbytes = hdrhist::HDRHist::new();
+
+    // Trick for the first "interval" measure
+    let mut t1_read = ticks();
+    let mut first_time = true;
+
     while active {
         buffer.ensure_capacity(1);
 
         assert!(!buffer.empty().is_empty());
 
         // Attempt to read some more bytes into self.buffer.
-        let read = match reader.read(&mut buffer.empty()) {
-            Ok(n) => n,
-            Err(x) => {
-                // We don't expect this, as socket closure results in Ok(0) reads.
-                println!("Error: {:?}", x);
-                0
-            },
-        };
+        let mut read = -1;
+        let t0_sleep = ticks();
+        let mut t0_read = ticks();
+        if !first_time {
+            hist_interval.add_value(t0_read - t1_read);
+        } else {
+            first_time = false;
+        }
+
+        while read <= 0 {
+            read = match reader.read(&mut buffer.empty()) {
+                Ok(n) => n as isize,
+                Err(x) => {
+                    match x.kind() {
+                        std::io::ErrorKind::WouldBlock => {
+                            t0_read = ticks();
+                            -1
+                        },
+                        _ => {
+                            println!("Error: {:?}", x);
+                            0
+                        },
+                    }
+                    // We don't expect this, as socket closure results in Ok(0) reads.
+                },
+            };
+        }
+        t1_read = ticks();
+        hist_nbytes.add_value(read as u64);
+        hist_sleep.add_value(t0_read - t0_sleep);
+        hist_read.add_value(t1_read - t0_read);
 
         assert!(read > 0);
-        buffer.make_valid(read);
+        buffer.make_valid(read as usize);
         // Consume complete messages from the front of self.buffer.
         while let Some(header) = MessageHeader::try_read(buffer.valid()) {
 
@@ -87,8 +123,30 @@ pub fn recv_loop(
                     panic!("Clean shutdown followed by data.");
                 }
                 buffer.ensure_capacity(1);
-                if reader.read(&mut buffer.empty()).expect("read failure") > 0 {
-                    panic!("Clean shutdown followed by data.");
+
+                let mut read = 0;
+                while read < 0 {
+                    read = match reader.read(&mut buffer.empty()) {
+                        Ok(n) => {
+                            if n > 0 {
+                                panic!("Clean shutdown followed by data.");
+                            }
+                            0
+                        }
+                        ,
+                        Err(x) => {
+                            match x.kind() {
+                                std::io::ErrorKind::WouldBlock => {
+                                    -1
+                                },
+                                _ => {
+                                    println!("Error: {:?}", x);
+                                    0
+                                },
+                            }
+                            // We don't expect this, as socket closure results in Ok(0) reads.
+                        },
+                    };
                 }
             }
         }
@@ -103,6 +161,27 @@ pub fn recv_loop(
     }
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: false, }));
+
+    println!("------------\nTime interval of computation (cycles)\n---------------");
+    println!("{}", hist_interval.summary_string());
+    for entry in hist_interval.ccdf_upper_bound() {
+        println!("{:?}", entry);
+    }
+    println!("------------\nTime duration of tcpread (cycles)\n---------------");
+    println!("{}", hist_read.summary_string());
+    for entry in hist_read.ccdf_upper_bound() {
+        println!("{:?}", entry);
+    }
+    println!("------------\nTime duration of sleep (cycles)\n---------------");
+    println!("{}", hist_sleep.summary_string());
+    for entry in hist_sleep.ccdf_upper_bound() {
+        println!("{:?}", entry);
+    }
+    println!("------------\nNumber of bytes read\n---------------");
+    println!("{}", hist_nbytes.summary_string());
+    for entry in hist_nbytes.ccdf_upper_bound() {
+        println!("{:?}", entry);
+    }
 }
 
 /// Repeatedly sends messages into a TcpStream.
@@ -122,16 +201,8 @@ pub fn send_loop(
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: true, }));
 
-    let mut writer = ::std::io::BufWriter::with_capacity(1 << 16, writer);
+    let mut writer = MyBufWriter::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
-
-    let mut hist = hdrhist::HDRHist::new();
-    let mut hist_write = hdrhist::HDRHist::new();
-    let mut hist_nbytes = hdrhist::HDRHist::new();
-
-    let mut t0 = ticks();
-    let mut n_bytes = 0;
-    let mut zero_count = 0;
 
     while !sources.is_empty() {
 
@@ -148,19 +219,7 @@ pub fn send_loop(
             // still be a signal incoming.
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
-            let t1 = ticks();
-            if n_bytes != 0 {
-                hist.add_value(t1 - t0);
-            } else {
-                zero_count += 1;
-            }
             writer.flush().expect("Failed to flush writer.");
-            t0 = ticks();
-            if n_bytes != 0 {
-                hist_write.add_value(t0 - t1);
-                hist_nbytes.add_value(n_bytes);
-            }
-            n_bytes = 0;
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
                 signal.wait();
@@ -178,7 +237,6 @@ pub fn send_loop(
                             offset += header.required_bytes();
                         }
                     });
-                    n_bytes += bytes.len() as u64;
                     writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
                 }
             }
@@ -200,21 +258,117 @@ pub fn send_loop(
     logger.as_mut().map(|logger| logger.log(MessageEvent { is_send: true, header }));
 
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
+}
 
-    println!("------------\nTime interval between flushes (cycles)\n---------------");
-    println!("{}", hist.summary_string());
-    for entry in hist.ccdf_upper_bound() {
-        println!("{:?}", entry);
+
+
+
+
+struct MyBufWriter<W: Write> {
+    inner: Option<W>,
+    buf: Vec<u8>,
+    // #30888: If the inner writer panics in a call to write, we don't want to
+    // write the buffered data a second time in BufWriter's destructor. This
+    // flag tells the Drop impl if it should skip the flush.
+    panicked: bool,
+}
+
+struct IntoInnerError<W>(W, Error);
+
+impl<W: Write> MyBufWriter<W> {
+
+    pub fn new(inner: W) -> MyBufWriter<W> {
+        MyBufWriter::with_capacity( 8 * 1024, inner)
     }
-    println!("------------\nTime duration of flush (cycles)\n---------------");
-    println!("{}", hist_write.summary_string());
-    for entry in hist_write.ccdf_upper_bound() {
-        println!("{:?}", entry);
+
+    pub fn with_capacity(cap: usize, inner: W) -> MyBufWriter<W> {
+        MyBufWriter {
+            inner: Some(inner),
+            buf: Vec::with_capacity(cap),
+            panicked: false,
+        }
     }
-    println!("------------\nNumber of bytes written at flush\n---------------");
-    println!("{}", hist_nbytes.summary_string());
-    for entry in hist_nbytes.ccdf_upper_bound() {
-        println!("{:?}", entry);
+
+    fn flush_buf(&mut self) -> io::Result<()> {
+        let mut written = 0;
+        let len = self.buf.len();
+        let mut ret = Ok(());
+        while written < len {
+            self.panicked = true;
+
+
+            let writer = self.inner.as_mut().unwrap();
+            let mut r = Ok(1);
+            let mut success = false;
+
+            while !success {
+                r = match writer.write(&self.buf[written..]) {
+                    Ok(n) => {
+                        success = true;
+                        Ok(n)
+                    },
+                    Err(err) => {
+                        match err.kind() {
+                            std::io::ErrorKind::WouldBlock => {
+                                Err(err)
+                            },
+                            _ => panic!("UNKNOWN ERROR")
+                        }
+                    }
+                }
+            }
+
+            self.panicked = false;
+
+            match r {
+                Ok(0) => {
+                    ret = Err(Error::new(ErrorKind::WriteZero,
+                                         "failed to write the buffered data"));
+                    break;
+                }
+                Ok(n) => written += n,
+                Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => { ret = Err(e); break }
+
+            }
+        }
+        if written > 0 {
+            self.buf.drain(..written);
+        }
+        ret
     }
-    println!("ZEROCOUNT: {}", zero_count);
+
+    fn get_ref(&self) -> &W { self.inner.as_ref().unwrap() }
+
+    fn get_mut(&mut self) -> &mut W { self.inner.as_mut().unwrap() }
+
+    fn buffer(&self) -> &[u8] {
+        &self.buf
+    }
+
+    fn into_inner(mut self) -> Result<W, IntoInnerError<MyBufWriter<W>>> {
+        match self.flush_buf() {
+            Err(e) => Err(IntoInnerError(self, e)),
+            Ok(()) => Ok(self.inner.take().unwrap())
+        }
+    }
+}
+
+impl<W: Write> Write for MyBufWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.buf.len() + buf.len() > self.buf.capacity() {
+            self.flush_buf()?;
+        }
+        if buf.len() >= self.buf.capacity() {
+            self.panicked = true;
+            let r = self.inner.as_mut().unwrap().write(buf);
+            self.panicked = false;
+            r
+        } else {
+            Write::write(&mut self.buf, buf)
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.flush_buf().and_then(|()| self.get_mut().flush())
+    }
 }

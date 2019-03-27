@@ -32,7 +32,6 @@ pub fn recv_loop(
     remote: usize,
     mut logger: Option<Logger<CommunicationEvent, CommunicationSetup>>)
 {
-    reader.set_nonblocking(true).expect("NONBLOCKING SETUP FAILED");
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: true }));
     let mut buffer = BytesSlab::new(20);
@@ -52,15 +51,6 @@ pub fn recv_loop(
     // can be recovered once all readers have read what they need to.
     let mut active = true;
 
-    let mut hist_interval = hdrhist::HDRHist::new();
-    let mut hist_read = hdrhist::HDRHist::new();
-    let mut hist_sleep = hdrhist::HDRHist::new();
-    let mut hist_nbytes = hdrhist::HDRHist::new();
-
-    // Trick for the first "interval" measure
-    let mut t1_read = ticks();
-    let mut first_time = true;
-
     while active {
         buffer.ensure_capacity(1);
 
@@ -68,13 +58,6 @@ pub fn recv_loop(
 
         // Attempt to read some more bytes into self.buffer.
         let mut read = -1;
-        let t0_sleep = ticks();
-        let mut t0_read = ticks();
-        if !first_time {
-            hist_interval.add_value(t0_read - t1_read);
-        } else {
-            first_time = false;
-        }
 
         while read <= 0 {
             read = match reader.read(&mut buffer.empty()) {
@@ -82,7 +65,6 @@ pub fn recv_loop(
                 Err(x) => {
                     match x.kind() {
                         std::io::ErrorKind::WouldBlock => {
-                            t0_read = ticks();
                             -1
                         },
                         _ => {
@@ -94,10 +76,6 @@ pub fn recv_loop(
                 },
             };
         }
-        t1_read = ticks();
-        hist_nbytes.add_value(read as u64);
-        hist_sleep.add_value(t0_read - t0_sleep);
-        hist_read.add_value(t1_read - t0_read);
 
         assert!(read > 0);
         buffer.make_valid(read as usize);
@@ -160,27 +138,6 @@ pub fn recv_loop(
     }
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: false, }));
-
-    println!("------------\nTime interval of computation (cycles)\n---------------");
-    println!("{}", hist_interval.summary_string());
-    for entry in hist_interval.ccdf_upper_bound() {
-        println!("{:?}", entry);
-    }
-    println!("------------\nTime duration of tcpread (cycles)\n---------------");
-    println!("{}", hist_read.summary_string());
-    for entry in hist_read.ccdf_upper_bound() {
-        println!("{:?}", entry);
-    }
-    println!("------------\nTime duration of sleep (cycles)\n---------------");
-    println!("{}", hist_sleep.summary_string());
-    for entry in hist_sleep.ccdf_upper_bound() {
-        println!("{:?}", entry);
-    }
-    println!("------------\nNumber of bytes read\n---------------");
-    println!("{}", hist_nbytes.summary_string());
-    for entry in hist_nbytes.ccdf_upper_bound() {
-        println!("{:?}", entry);
-    }
 }
 
 /// Repeatedly sends messages into a TcpStream.
@@ -203,6 +160,8 @@ pub fn send_loop(
     let mut writer = MyBufWriter::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
 
+    let mut hist_write = hdrhist::HDRHist::new();
+
     while !sources.is_empty() {
 
         // TODO: Round-robin better, to release resources fairly when overloaded.
@@ -218,7 +177,12 @@ pub fn send_loop(
             // still be a signal incoming.
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
+
+            let t0 = ticks();
             writer.flush().expect("Failed to flush writer.");
+            let t1 = ticks();
+            hist_write.add_value(t1 -t0);
+
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
                 signal.wait();
@@ -257,10 +221,13 @@ pub fn send_loop(
     logger.as_mut().map(|logger| logger.log(MessageEvent { is_send: true, header }));
 
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
+
+    println!("------------\nTime duration of tcpwrite (cycles)\n---------------");
+    println!("{}", hist_write.summary_string());
+    for entry in hist_write.ccdf_upper_bound() {
+        println!("{:?}", entry);
+    }
 }
-
-
-
 
 
 struct MyBufWriter<W: Write> {

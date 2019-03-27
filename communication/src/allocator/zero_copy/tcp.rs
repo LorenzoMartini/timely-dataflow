@@ -160,8 +160,6 @@ pub fn send_loop(
     let mut writer = MyBufWriter::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
 
-    let mut hist_write = hdrhist::HDRHist::new();
-
     while !sources.is_empty() {
 
         // TODO: Round-robin better, to release resources fairly when overloaded.
@@ -178,10 +176,7 @@ pub fn send_loop(
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
 
-            let t0 = ticks();
             writer.flush().expect("Failed to flush writer.");
-            let t1 = ticks();
-            hist_write.add_value(t1 -t0);
 
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
@@ -221,12 +216,6 @@ pub fn send_loop(
     logger.as_mut().map(|logger| logger.log(MessageEvent { is_send: true, header }));
 
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
-
-    println!("------------\nTime duration of tcpwrite (cycles)\n---------------");
-    println!("{}", hist_write.summary_string());
-    for entry in hist_write.ccdf_upper_bound() {
-        println!("{:?}", entry);
-    }
 }
 
 
@@ -237,6 +226,8 @@ struct MyBufWriter<W: Write> {
     // write the buffered data a second time in BufWriter's destructor. This
     // flag tells the Drop impl if it should skip the flush.
     panicked: bool,
+    hist: hdrhist::HDRHist,
+    hist_group: hdrhist::HDRHist,
 }
 
 struct IntoInnerError<W>(W, Error);
@@ -252,6 +243,8 @@ impl<W: Write> MyBufWriter<W> {
             inner: Some(inner),
             buf: Vec::with_capacity(cap),
             panicked: false,
+            hist: hdrhist::HDRHist::new(),
+            hist_group: hdrhist::HDRHist::new(),
         }
     }
 
@@ -259,6 +252,9 @@ impl<W: Write> MyBufWriter<W> {
         let mut written = 0;
         let len = self.buf.len();
         let mut ret = Ok(());
+
+        let t0_group = ticks();
+
         while written < len {
             self.panicked = true;
 
@@ -266,8 +262,10 @@ impl<W: Write> MyBufWriter<W> {
             let writer = self.inner.as_mut().unwrap();
             let mut r = Ok(1);
             let mut success = false;
+            let mut t0 = ticks();
 
             while !success {
+                t0 = ticks();
                 r = match writer.write(&self.buf[written..]) {
                     Ok(n) => {
                         success = true;
@@ -283,6 +281,7 @@ impl<W: Write> MyBufWriter<W> {
                     }
                 }
             }
+            let t1 = ticks();
 
             self.panicked = false;
 
@@ -292,13 +291,19 @@ impl<W: Write> MyBufWriter<W> {
                                          "failed to write the buffered data"));
                     break;
                 }
-                Ok(n) => written += n,
+                Ok(n) => {
+                    self.hist.add_value(t1 - t0);
+                    written += n
+                },
                 Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
                 Err(e) => { ret = Err(e); break }
 
             }
         }
         if written > 0 {
+            let t1_group = ticks();
+            self.hist_group.add_value(t1_group - t0_group);
+
             self.buf.drain(..written);
         }
         ret
@@ -326,6 +331,7 @@ impl<W: Write> Write for MyBufWriter<W> {
             self.flush_buf()?;
         }
         if buf.len() >= self.buf.capacity() {
+            panic!("FLUSHING OUT OF FLUSH, BUF TOO SMALL");
             self.panicked = true;
             let r = self.inner.as_mut().unwrap().write(buf);
             self.panicked = false;
@@ -336,5 +342,20 @@ impl<W: Write> Write for MyBufWriter<W> {
     }
     fn flush(&mut self) -> io::Result<()> {
         self.flush_buf().and_then(|()| self.get_mut().flush())
+    }
+}
+
+impl<W: Write> Drop for MyBufWriter<W> {
+    fn drop(&mut self) {
+        println!("------------\nTime duration of tcpwrite (cycles)\n---------------");
+        println!("{}", self.hist.summary_string());
+        for entry in self.hist.ccdf_upper_bound() {
+            println!("{:?}", entry);
+        }
+        println!("------------\nTime duration of tcpwrite outer (cycles)\n---------------");
+        println!("{}", self.hist_group.summary_string());
+        for entry in self.hist_group.ccdf_upper_bound() {
+            println!("{:?}", entry);
+        }
     }
 }

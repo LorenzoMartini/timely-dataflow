@@ -153,7 +153,7 @@ pub fn send_loop(
     remote: usize,
     mut logger: Option<Logger<CommunicationEvent, CommunicationSetup>>)
 {
-
+    writer.set_nonblocking(true).expect("CAN'T set nonblock");
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: true, }));
 
@@ -328,6 +328,7 @@ impl<W: Write> MyBufWriter<W> {
 impl<W: Write> Write for MyBufWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.buf.len() + buf.len() > self.buf.capacity() {
+            panic!("FLUSHING OUT OF FLUSH, BUF TOO SMALL");
             self.flush_buf()?;
         }
         if buf.len() >= self.buf.capacity() {

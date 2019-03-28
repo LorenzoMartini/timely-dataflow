@@ -228,6 +228,7 @@ struct MyBufWriter<W: Write> {
     panicked: bool,
     hist: hdrhist::HDRHist,
     hist_group: hdrhist::HDRHist,
+    hist_n_bytes: hdrhist::HDRHist,
     cnt: usize,
 }
 
@@ -240,6 +241,7 @@ impl<W: Write> MyBufWriter<W> {
             panicked: false,
             hist: hdrhist::HDRHist::new(),
             hist_group: hdrhist::HDRHist::new(),
+            hist_n_bytes: hdrhist::HDRHist::new(),
             cnt: 0,
         }
     }
@@ -300,6 +302,7 @@ impl<W: Write> MyBufWriter<W> {
         if written > 0 {
             let t1_group = ticks();
             self.hist_group.add_value(t1_group - t0_group);
+            self.hist_n_bytes.add_value(written as u64);
 
             self.buf.drain(..written);
         }
@@ -344,6 +347,11 @@ impl<W: Write> Drop for MyBufWriter<W> {
         println!("------------\nTime duration of tcpwrite outer (cycles)\n---------------");
         println!("{}", self.hist_group.summary_string());
         for entry in self.hist_group.ccdf_upper_bound() {
+            println!("{:?}", entry);
+        }
+        println!("------------\nNbytes every tcpwrite\n---------------");
+        println!("{}", self.hist_n_bytes.summary_string());
+        for entry in self.hist_n_bytes.ccdf_upper_bound() {
             println!("{:?}", entry);
         }
     }

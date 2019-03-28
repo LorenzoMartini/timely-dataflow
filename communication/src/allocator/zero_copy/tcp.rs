@@ -228,6 +228,7 @@ struct MyBufWriter<W: Write> {
     panicked: bool,
     hist: hdrhist::HDRHist,
     hist_group: hdrhist::HDRHist,
+    cnt: usize,
 }
 
 struct IntoInnerError<W>(W, Error);
@@ -245,6 +246,7 @@ impl<W: Write> MyBufWriter<W> {
             panicked: false,
             hist: hdrhist::HDRHist::new(),
             hist_group: hdrhist::HDRHist::new(),
+            cnt: 0,
         }
     }
 
@@ -274,6 +276,7 @@ impl<W: Write> MyBufWriter<W> {
                     Err(err) => {
                         match err.kind() {
                             std::io::ErrorKind::WouldBlock => {
+                                self.cnt += 1;
                                 Err(err)
                             },
                             _ => panic!("UNKNOWN ERROR")
@@ -348,6 +351,7 @@ impl<W: Write> Write for MyBufWriter<W> {
 
 impl<W: Write> Drop for MyBufWriter<W> {
     fn drop(&mut self) {
+        println!("Blocked {} times", self.cnt);
         println!("------------\nTime duration of tcpwrite (cycles)\n---------------");
         println!("{}", self.hist.summary_string());
         for entry in self.hist.ccdf_upper_bound() {

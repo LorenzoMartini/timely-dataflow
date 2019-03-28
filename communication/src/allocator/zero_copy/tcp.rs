@@ -231,13 +231,7 @@ struct MyBufWriter<W: Write> {
     cnt: usize,
 }
 
-struct IntoInnerError<W>(W, Error);
-
 impl<W: Write> MyBufWriter<W> {
-
-    pub fn new(inner: W) -> MyBufWriter<W> {
-        MyBufWriter::with_capacity( 8 * 1024, inner)
-    }
 
     pub fn with_capacity(cap: usize, inner: W) -> MyBufWriter<W> {
         MyBufWriter {
@@ -309,23 +303,13 @@ impl<W: Write> MyBufWriter<W> {
 
             self.buf.drain(..written);
         }
+        if self.buf.len() != 0 {
+            panic!("Something was not flushed");
+        }
         ret
     }
 
-    fn get_ref(&self) -> &W { self.inner.as_ref().unwrap() }
-
     fn get_mut(&mut self) -> &mut W { self.inner.as_mut().unwrap() }
-
-    fn buffer(&self) -> &[u8] {
-        &self.buf
-    }
-
-    fn into_inner(mut self) -> Result<W, IntoInnerError<MyBufWriter<W>>> {
-        match self.flush_buf() {
-            Err(e) => Err(IntoInnerError(self, e)),
-            Ok(()) => Ok(self.inner.take().unwrap())
-        }
-    }
 }
 
 impl<W: Write> Write for MyBufWriter<W> {

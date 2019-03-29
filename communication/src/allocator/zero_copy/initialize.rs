@@ -61,13 +61,16 @@ pub fn initialize_networking(
     for index in 0..results.len() {
 
         if let Some(stream) = results[index].take() {
-            // remote process
+
+            stream.set_nonblocking(true).expect("NONBLOCKING SETUP FAILED");
 
             let (remote_recv, signal) = remote_recv_iter.next().unwrap();
 
             {
                 let log_sender = log_sender.clone();
                 let stream = stream.try_clone()?;
+
+                stream.set_nonblocking(true).expect("NONBLOCKING SETUP FAILED");
                 let join_guard =
                 ::std::thread::Builder::new()
                     .name(format!("send thread {}", index))
@@ -91,6 +94,8 @@ pub fn initialize_networking(
                 // let remote_sends = remote_sends.clone();
                 let log_sender = log_sender.clone();
                 let stream = stream.try_clone()?;
+
+                stream.set_nonblocking(true).expect("NONBLOCKING SETUP FAILED");
                 let join_guard =
                 ::std::thread::Builder::new()
                     .name(format!("recv thread {}", index))

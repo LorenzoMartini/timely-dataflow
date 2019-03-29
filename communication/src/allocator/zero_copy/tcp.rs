@@ -160,6 +160,8 @@ pub fn send_loop(
     let mut writer = MyBufWriter::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
 
+    let mut to_flush = false;
+
     while !sources.is_empty() {
 
         // TODO: Round-robin better, to release resources fairly when overloaded.
@@ -176,14 +178,15 @@ pub fn send_loop(
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
 
-            writer.flush().expect("Failed to flush writer.");
+            if to_flush {
+                writer.flush().expect("Failed to flush writer.");
+                to_flush = false;
+            }
 
             sources.retain(|source| !source.is_complete());
-            if !sources.is_empty() {
-                signal.wait();
-            }
         }
             else {
+                to_flush = true;
                 // TODO: Could do scatter/gather write here.
                 for mut bytes in stash.drain(..) {
 

@@ -182,16 +182,15 @@ pub fn send_loop(
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
 
-            let t0 = ticks();
-            writer.flush().expect("Failed to flush writer.");
-            hist_write.add_value(ticks() - t0);
-            hist_nbytes.add_value(n_bytes);
-            n_bytes = 0;
+            if n_bytes != 0 {
+                let t0 = ticks();
+                writer.flush().expect("Failed to flush writer.");
+                hist_write.add_value(ticks() - t0);
+                hist_nbytes.add_value(n_bytes);
+                n_bytes = 0;
+            }
 
             sources.retain(|source| !source.is_complete());
-            if !sources.is_empty() {
-                signal.wait();
-            }
         }
             else {
                 // TODO: Could do scatter/gather write here.

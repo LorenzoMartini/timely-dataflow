@@ -156,6 +156,7 @@ impl Allocate for ProcessAllocator {
     // Perform preparatory work, most likely reading binary buffers from self.recv.
     #[inline(never)]
     fn receive(&mut self) {
+
         // Check for channels whose `Puller` has been dropped.
         let mut canaries = self.canaries.borrow_mut();
         for dropped_channel in canaries.drain(..) {

@@ -1,5 +1,5 @@
 //!
-extern crate streaming_harness_hdrhist;
+extern crate hdrhist;
 extern crate amd64_timer;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -126,7 +126,7 @@ pub fn send_loop(
 
     let mut writer = MyBuf::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
-    let mut hist = streaming_harness_hdrhist::HDRHist::new();
+    let mut hist = hdrhist::HDRHist::new();
     //let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
 
     let mut times: VecDeque<u64> = VecDeque::new();
@@ -208,7 +208,7 @@ pub fn send_loop(
 
     println!("------------\nWrite delay summary\n---------------");
     println!("{}", hist.summary_string());
-    for entry in hist.ccdf() {
+    for entry in hist.ccdf_upper_bound() {
         println!("{:?}", entry);
     }
 //    println!("------------\nbytes summary\n---------------");

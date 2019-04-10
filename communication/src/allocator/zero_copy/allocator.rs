@@ -210,6 +210,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         }
 
         let mut events = self.inner.events().borrow_mut();
+
         for mut bytes in self.staged.drain(..) {
 
             // We expect that `bytes` contains an integral number of messages.

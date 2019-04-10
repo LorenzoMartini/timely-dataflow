@@ -61,6 +61,7 @@ pub fn initialize_networking(
     for index in 0..results.len() {
 
         if let Some(stream) = results[index].take() {
+            // remote process
 
             let (remote_recv, signal) = remote_recv_iter.next().unwrap();
 

@@ -1,9 +1,8 @@
 //!
-extern crate streaming_harness_hdrhist;
-extern crate amd64_timer;
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use self::amd64_timer::ticks;
+
 use networking::MessageHeader;
 
 use super::bytes_slab::BytesSlab;
@@ -12,10 +11,6 @@ use super::bytes_exchange::{MergeQueue, Signal};
 use logging_core::Logger;
 
 use ::logging::{CommunicationEvent, CommunicationSetup, MessageEvent, StateEvent};
-use std::io::Error;
-use std::io::ErrorKind;
-use std::io;
-use std::collections::VecDeque;
 
 /// Repeatedly reads from a TcpStream and carves out messages.
 ///
@@ -33,6 +28,7 @@ pub fn recv_loop(
 {
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: true }));
+
     let mut buffer = BytesSlab::new(20);
 
     // Where we stash Bytes before handing them off.
@@ -49,8 +45,8 @@ pub fn recv_loop(
     // allocation and place the existing Bytes into `self.in_progress`, so that it
     // can be recovered once all readers have read what they need to.
     let mut active = true;
-
     while active {
+
         buffer.ensure_capacity(1);
 
         assert!(!buffer.empty().is_empty());
@@ -67,6 +63,7 @@ pub fn recv_loop(
 
         assert!(read > 0);
         buffer.make_valid(read);
+
         // Consume complete messages from the front of self.buffer.
         while let Some(header) = MessageHeader::try_read(buffer.valid()) {
 
@@ -101,8 +98,8 @@ pub fn recv_loop(
             use allocator::zero_copy::bytes_exchange::BytesPush;
             targets[index].extend(staged.drain(..));
         }
-
     }
+
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: false, }));
 }
@@ -124,25 +121,15 @@ pub fn send_loop(
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: true, }));
 
-    let mut writer = MyBuf::with_capacity(1 << 16, writer);
+    let mut writer = ::std::io::BufWriter::with_capacity(1 << 16, writer);
     let mut stash = Vec::new();
-    let mut hist = streaming_harness_hdrhist::HDRHist::new();
-    //let mut hist_n_bytes = streaming_harness_hdrhist::HDRHist::new();
-
-    let mut times: VecDeque<u64> = VecDeque::new();
 
     while !sources.is_empty() {
 
-        let mut len = stash.len();
         // TODO: Round-robin better, to release resources fairly when overloaded.
         for source in sources.iter_mut() {
             use allocator::zero_copy::bytes_exchange::BytesPull;
             source.drain_into(&mut stash);
-            if stash.len() > len {
-                // Pushed something => insert t0 in queue
-                times.push_back(ticks());
-                len = stash.len();
-            }
         }
 
         if stash.is_empty() {
@@ -152,40 +139,28 @@ pub fn send_loop(
             // still be a signal incoming.
             //
             // We could get awoken by more data, a channel closing, or spuriously perhaps.
-            let t1 = ticks();
-            let sent = writer.flush_and_count().expect("Failed to flush writer.") as u64;
-//            if sent > 0 {
-//                hist_n_bytes.add_value(sent);
-//            }
-            while !times.is_empty() {
-                hist.add_value(t1 - times.pop_front().unwrap());
-            }
+            writer.flush().expect("Failed to flush writer.");
             sources.retain(|source| !source.is_complete());
             if !sources.is_empty() {
                 signal.wait();
             }
         }
-            else {
-                // TODO: Could do scatter/gather write here.
-                for mut bytes in stash.drain(..) {
+        else {
+            // TODO: Could do scatter/gather write here.
+            for mut bytes in stash.drain(..) {
 
-                    // Record message sends.
-                    logger.as_mut().map(|logger| {
-                        let mut offset = 0;
-                        while let Some(header) = MessageHeader::try_read(&mut bytes[offset..]) {
-                            logger.log(MessageEvent { is_send: true, header, });
-                            offset += header.required_bytes();
-                        }
-                    });
-
-                    let flushed = writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
-                    if flushed {
-                        // Don't bother measuring this flush, it never happens.
-                        // If for some reason it happens just repeat experiment
-                        panic!("FLUSHED out of flushing");
+                // Record message sends.
+                logger.as_mut().map(|logger| {
+                    let mut offset = 0;
+                    while let Some(header) = MessageHeader::try_read(&mut bytes[offset..]) {
+                        logger.log(MessageEvent { is_send: true, header, });
+                        offset += header.required_bytes();
                     }
-                }
+                });
+
+                writer.write_all(&bytes[..]).expect("Write failure in send_loop.");
             }
+        }
     }
 
     // Write final zero-length header.
@@ -205,119 +180,4 @@ pub fn send_loop(
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
-
-    println!("------------\nWrite delay summary\n---------------");
-    println!("{}", hist.summary_string());
-    for entry in hist.ccdf() {
-        println!("{:?}", entry);
-    }
-//    println!("------------\nbytes summary\n---------------");
-//    println!("{}", hist_n_bytes.summary_string());
-//    for entry in hist_n_bytes.ccdf() {
-//        println!("{:?}", entry);
-//    }
-}
-
-
-struct MyBuf {
-    inner: Option<TcpStream>,
-    buf: Vec<u8>,
-    panicked: bool,
-}
-
-impl MyBuf {
-    fn write_all(&mut self, mut buf: &[u8]) -> io::Result<bool> {
-        let mut flush = false;
-        while !buf.is_empty() {
-            match self.write_and_time(buf) {
-                Ok((0, _)) => return Err(Error::new(ErrorKind::WriteZero,
-                                               "failed to write whole buffer")),
-                Ok((n, flushed)) => {
-                    buf = &buf[n..];
-                    if !flush {
-                        // Check a one time flush
-                        flush = flushed;
-                    }
-                },
-                Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
-                Err(e) => return Err(e),
-            }
-        }
-        Ok(flush)
-    }
-
-    pub fn with_capacity(cap: usize, inner: TcpStream) -> MyBuf {
-        MyBuf {
-            inner: Some(inner),
-            buf: Vec::with_capacity(cap),
-            panicked: false,
-        }
-    }
-
-    fn flush_buf(&mut self) -> io::Result<()> {
-        let mut written = 0;
-        let len = self.buf.len();
-        let mut ret = Ok(());
-        while written < len {
-            self.panicked = true;
-            let r = self.inner.as_mut().unwrap().write(&self.buf[written..]);
-            self.panicked = false;
-
-            match r {
-                Ok(0) => {
-                    ret = Err(Error::new(ErrorKind::WriteZero,
-                                         "failed to write the buffered data"));
-                    break;
-                }
-                Ok(n) => written += n,
-                Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
-                Err(e) => { ret = Err(e); break }
-
-            }
-        }
-        if written > 0 {
-            self.buf.drain(..written);
-        }
-        ret
-    }
-
-    pub fn get_mut(&mut self) -> &mut TcpStream { self.inner.as_mut().unwrap() }
-
-    fn write_and_time(&mut self, buf: &[u8]) -> io::Result<(usize, bool)> {
-        if self.buf.len() + buf.len() > self.buf.capacity() {
-            self.flush_buf()?;
-        }
-        if buf.len() >= self.buf.capacity() {
-            self.panicked = true;
-            let r = self.inner.as_mut().unwrap().write(buf);
-            self.panicked = false;
-            r.map(|result| (result, true))
-        } else {
-            Write::write(&mut self.buf, buf).map(|result| (result, false))
-        }
-    }
-    fn flush_and_count(&mut self) -> io::Result<(usize)> {
-        let len = self.buf.len();
-        self.flush_buf().and_then(|()| self.get_mut().flush());
-        Ok(len)
-    }
-}
-
-impl Write for MyBuf {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.buf.len() + buf.len() > self.buf.capacity() {
-            self.flush_buf()?;
-        }
-        if buf.len() >= self.buf.capacity() {
-            self.panicked = true;
-            let r = self.inner.as_mut().unwrap().write(buf);
-            self.panicked = false;
-            r
-        } else {
-            Write::write(&mut self.buf, buf)
-        }
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        self.flush_buf().and_then(|()| self.get_mut().flush())
-    }
 }
